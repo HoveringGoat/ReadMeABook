@@ -3,6 +3,7 @@
  * Documentation: documentation/phase3/README.md
  */
 
+import path from 'path';
 import { MonitorDownloadPayload, getJobQueueService } from '../services/job-queue.service';
 import { prisma } from '../db';
 import { getQBittorrentService } from '../integrations/qbittorrent.service';
@@ -89,11 +90,20 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
 
       // Get torrent files to find download path
       const files = await qbt.getFiles(downloadClientId);
-      const downloadPath = torrent.save_path;
 
-      await logger?.info(`Downloaded to: ${downloadPath}`, {
+      // Determine actual content path for file organization
+      // Priority 1: Use content_path if provided by qBittorrent (most reliable)
+      // Priority 2: Construct path using path.join() for proper normalization
+      const organizePath = torrent.content_path
+        ? torrent.content_path
+        : path.join(torrent.save_path, torrent.name);
+
+      await logger?.info(`Download completed`, {
         filesCount: files.length,
         torrentName: torrent.name,
+        savePath: torrent.save_path,
+        contentPath: torrent.content_path || '(not provided)',
+        organizePath,
       });
 
       // Update download history to completed
@@ -120,12 +130,12 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
         throw new Error('Request or audiobook not found or deleted');
       }
 
-      // Trigger organize files job (target path determined by database config)
+      // Trigger organize files job with properly constructed path
       const jobQueue = getJobQueueService();
       await jobQueue.addOrganizeJob(
         requestId,
         request.audiobook.id,
-        `${downloadPath}/${torrent.name}`
+        organizePath
       );
 
       await logger?.info(`Triggered organize_files job for request ${requestId}`);
@@ -136,7 +146,7 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
         message: 'Download completed, organizing files',
         requestId,
         progress: 100,
-        downloadPath,
+        downloadPath: organizePath,
       };
     } else if (progress.state === 'failed') {
       await logger?.error(`Download failed for request ${requestId}`);

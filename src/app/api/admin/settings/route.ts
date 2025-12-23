@@ -15,6 +15,11 @@ export async function GET(request: NextRequest) {
     const configs = await prisma.configuration.findMany();
     const configMap = new Map(configs.map((c) => [c.key, c.value]));
 
+    // Check if any local users exist (for validation)
+    const hasLocalUsers = (await prisma.user.count({
+      where: { authProvider: 'local' }
+    })) > 0;
+
     // Mask sensitive values
     const maskValue = (key: string, value: string | null | undefined) => {
       const sensitiveKeys = ['token', 'api_key', 'password', 'secret'];
@@ -27,6 +32,7 @@ export async function GET(request: NextRequest) {
     // Build response object
     const settings = {
       backendMode: configMap.get('system.backend_mode') || 'plex',
+      hasLocalUsers,
       plex: {
         url: configMap.get('plex_url') || '',
         token: maskValue('token', configMap.get('plex_token')),

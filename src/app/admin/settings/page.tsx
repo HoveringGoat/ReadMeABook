@@ -31,6 +31,7 @@ interface IndexerConfig {
 
 interface Settings {
   backendMode: 'plex' | 'audiobookshelf';
+  hasLocalUsers: boolean;
   plex: {
     url: string;
     token: string;
@@ -777,12 +778,12 @@ export default function AdminSettings() {
           break;
 
         case 'auth':
-          // Validate: In Audiobookshelf mode, at least one auth method must be enabled
+          // Validate: In Audiobookshelf mode, at least one auth method must be enabled OR local users must exist
           if (settings.backendMode === 'audiobookshelf') {
-            if (!settings.oidc.enabled && !settings.registration.enabled) {
+            if (!settings.oidc.enabled && !settings.registration.enabled && !settings.hasLocalUsers) {
               setMessage({
                 type: 'error',
-                text: 'At least one authentication method must be enabled (OIDC or Manual Registration). Otherwise, users will not be able to log in.',
+                text: 'At least one authentication method must be enabled (OIDC or Manual Registration) since no local users exist. Otherwise, you will be locked out of the system.',
               });
               setSaving(false);
               return;
@@ -2296,8 +2297,8 @@ export default function AdminSettings() {
                   </div>
                 </div>
 
-                {/* Warning: No auth methods enabled */}
-                {settings.backendMode === 'audiobookshelf' && !settings.oidc.enabled && !settings.registration.enabled && (
+                {/* Warning: No auth methods enabled AND no local users exist */}
+                {settings.backendMode === 'audiobookshelf' && !settings.oidc.enabled && !settings.registration.enabled && !settings.hasLocalUsers && (
                   <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
                     <div className="flex gap-3">
                       <svg className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2305,11 +2306,30 @@ export default function AdminSettings() {
                       </svg>
                       <div>
                         <h3 className="text-sm font-semibold text-red-800 dark:text-red-200">
-                          No Authentication Methods Enabled
+                          No Authentication Methods Available
                         </h3>
                         <p className="text-sm text-red-700 dark:text-red-300 mt-1">
-                          You must enable at least one authentication method (OIDC or Manual Registration).
-                          If you save with both disabled, users will not be able to log in to the system.
+                          You must enable at least one authentication method (OIDC or Manual Registration) since no local users exist.
+                          Saving with both disabled will lock you out of the system.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Info: Registration disabled but local users can still log in */}
+                {settings.backendMode === 'audiobookshelf' && !settings.oidc.enabled && !settings.registration.enabled && settings.hasLocalUsers && (
+                  <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                    <div className="flex gap-3">
+                      <svg className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <div>
+                        <h3 className="text-sm font-semibold text-blue-800 dark:text-blue-200">
+                          Manual Registration Disabled
+                        </h3>
+                        <p className="text-sm text-blue-700 dark:text-blue-300 mt-1">
+                          New user registration is disabled. Existing local users can still log in with their credentials.
                         </p>
                       </div>
                     </div>
@@ -2501,10 +2521,12 @@ export default function AdminSettings() {
                         return !validated.audiobookshelf;
                       }
                     }
-                    // For Auth tab: disable if no auth methods are enabled in Audiobookshelf mode
+                    // For Auth tab: disable if no auth methods are enabled AND no local users exist in Audiobookshelf mode
                     if (activeTab === 'auth' && settings) {
                       if (settings.backendMode === 'audiobookshelf') {
-                        return !settings.oidc.enabled && !settings.registration.enabled;
+                        // Allow disabling both if local users exist (they can still log in)
+                        // Prevent disabling both if no local users exist (would lock out system)
+                        return !settings.oidc.enabled && !settings.registration.enabled && !settings.hasLocalUsers;
                       }
                       return false;
                     }

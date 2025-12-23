@@ -33,6 +33,7 @@ export interface TorrentInfo {
   category: string;
   tags: string;
   save_path: string;
+  content_path?: string; // Absolute path to torrent content (file or directory)
   completion_on: number; // Unix timestamp
   added_on: number;
   seeding_time?: number; // Seconds spent seeding

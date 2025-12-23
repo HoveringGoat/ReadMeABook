@@ -35,6 +35,7 @@ function LoginContent() {
     backendMode: string;
     providers: string[];
     registrationEnabled: boolean;
+    hasLocalUsers: boolean;
     oidcProviderName: string | null;
   } | null>(null);
   const [showRegisterForm, setShowRegisterForm] = useState(false);
@@ -72,6 +73,7 @@ function LoginContent() {
           backendMode: 'plex',
           providers: ['plex'],
           registrationEnabled: false,
+          hasLocalUsers: false,
           oidcProviderName: null,
         });
       }

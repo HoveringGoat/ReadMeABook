@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { prisma } from '@/lib/db';
+import { getQBittorrentService } from '@/lib/integrations/qbittorrent.service';
 
 export async function GET(request: NextRequest) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
@@ -17,7 +18,11 @@ export async function GET(request: NextRequest) {
         status: 'downloading',
         deletedAt: null,
       },
-      include: {
+      select: {
+        id: true,
+        status: true,
+        progress: true,
+        updatedAt: true,
         audiobook: {
           select: {
             id: true,
@@ -42,6 +47,7 @@ export async function GET(request: NextRequest) {
           select: {
             downloadStatus: true,
             torrentName: true,
+            torrentHash: true,
           },
         },
       },
@@ -51,20 +57,67 @@ export async function GET(request: NextRequest) {
       take: 20,
     });
 
-    // Format response
-    const formatted = activeDownloads.map((download) => ({
-      requestId: download.id,
-      title: download.audiobook.title,
-      author: download.audiobook.author,
-      status: download.status,
-      progress: download.progress,
-      torrentName: download.downloadHistory[0]?.torrentName || null,
-      downloadStatus: download.downloadHistory[0]?.downloadStatus || null,
-      user: download.user.plexUsername,
-      startedAt: download.updatedAt,
-    }));
+    // Get qBittorrent service
+    let qbService;
+    try {
+      qbService = await getQBittorrentService();
+    } catch (error) {
+      console.error('[Admin] Failed to initialize qBittorrent service:', error);
+      // Return downloads without speed/eta if qBittorrent is unavailable
+      const formatted = activeDownloads.map((download) => ({
+        requestId: download.id,
+        title: download.audiobook.title,
+        author: download.audiobook.author,
+        status: download.status,
+        progress: download.progress,
+        speed: 0,
+        eta: null,
+        torrentName: download.downloadHistory[0]?.torrentName || null,
+        downloadStatus: download.downloadHistory[0]?.downloadStatus || null,
+        user: download.user.plexUsername,
+        startedAt: download.updatedAt,
+      }));
+      return NextResponse.json({ downloads: formatted });
+    }
 
-        return NextResponse.json({ downloads: formatted });
+    // Format response with speed and ETA from qBittorrent
+    const formatted = await Promise.all(
+      activeDownloads.map(async (download) => {
+        let speed = 0;
+        let eta: number | null = null;
+
+        // Get torrent hash from download history
+        const torrentHash = download.downloadHistory[0]?.torrentHash;
+
+        // Fetch torrent info from qBittorrent if we have a hash
+        if (torrentHash) {
+          try {
+            const torrentInfo = await qbService.getTorrent(torrentHash);
+            speed = torrentInfo.dlspeed;
+            eta = torrentInfo.eta > 0 ? torrentInfo.eta : null;
+          } catch (error) {
+            // Torrent not found or other error - use defaults
+            console.error(`[Admin] Failed to get torrent info for ${torrentHash}:`, error);
+          }
+        }
+
+        return {
+          requestId: download.id,
+          title: download.audiobook.title,
+          author: download.audiobook.author,
+          status: download.status,
+          progress: download.progress,
+          speed,
+          eta,
+          torrentName: download.downloadHistory[0]?.torrentName || null,
+          downloadStatus: download.downloadHistory[0]?.downloadStatus || null,
+          user: download.user.plexUsername,
+          startedAt: download.updatedAt,
+        };
+      })
+    );
+
+    return NextResponse.json({ downloads: formatted });
       } catch (error) {
         console.error('[Admin] Failed to fetch active downloads:', error);
         return NextResponse.json(

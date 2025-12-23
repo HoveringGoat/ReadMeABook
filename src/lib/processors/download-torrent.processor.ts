@@ -44,11 +44,7 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload): P
 
     const torrentHash = await qbt.addTorrent(torrent.downloadUrl, {
       category: 'readmeabook',
-      tags: [
-        'audiobook',
-        `request-${requestId}`,
-        `audiobook-${audiobook.id}`,
-      ],
+      tags: ['audiobook'], // Generic tag for all audiobooks
       sequentialDownload: true, // Download in order for potential streaming
       paused: false, // Start immediately
     });

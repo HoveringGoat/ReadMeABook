@@ -5,6 +5,7 @@
 
 import { NextResponse } from 'next/server';
 import { ConfigurationService } from '@/lib/services/config.service';
+import { prisma } from '@/lib/db';
 
 export async function GET() {
   try {
@@ -17,22 +18,36 @@ export async function GET() {
       const registrationEnabled = (await configService.get('auth.registration_enabled')) === 'true';
       const oidcProviderName = await configService.get('oidc.provider_name') || 'SSO';
 
+      // Check if any local users exist in database (for login form visibility)
+      const hasLocalUsers = (await prisma.user.count({
+        where: { authProvider: 'local' }
+      })) > 0;
+
       const providers: string[] = [];
       if (oidcEnabled) providers.push('oidc');
-      if (registrationEnabled) providers.push('local');
+      if (hasLocalUsers) providers.push('local');
 
       return NextResponse.json({
         backendMode: 'audiobookshelf',
         providers,
         registrationEnabled,
+        hasLocalUsers,
         oidcProviderName: oidcEnabled ? oidcProviderName : null,
       });
     } else {
-      // Plex mode
+      // Plex mode - check if local admin exists (setup admin)
+      const hasLocalUsers = (await prisma.user.count({
+        where: {
+          plexId: { startsWith: 'local-' },
+          isSetupAdmin: true
+        }
+      })) > 0;
+
       return NextResponse.json({
         backendMode: 'plex',
         providers: ['plex'],
         registrationEnabled: false,
+        hasLocalUsers,
         oidcProviderName: null,
       });
     }
@@ -43,6 +58,7 @@ export async function GET() {
       backendMode: 'plex',
       providers: ['plex'],
       registrationEnabled: false,
+      hasLocalUsers: false,
       oidcProviderName: null,
     });
   }

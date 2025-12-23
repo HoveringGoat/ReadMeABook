@@ -34,11 +34,12 @@ export async function PUT(
           );
         }
 
-        // Check if user is the setup admin
+        // Check if user is the setup admin or OIDC user
         const targetUser = await prisma.user.findUnique({
           where: { id },
           select: {
             isSetupAdmin: true,
+            authProvider: true,
             plexUsername: true,
           },
         });
@@ -54,6 +55,14 @@ export async function PUT(
         if (targetUser.isSetupAdmin && role !== 'admin') {
           return NextResponse.json(
             { error: 'Cannot change the setup admin role. This account must always remain an admin.' },
+            { status: 403 }
+          );
+        }
+
+        // Prevent changing OIDC user roles (managed by identity provider)
+        if (targetUser.authProvider === 'oidc') {
+          return NextResponse.json(
+            { error: 'Cannot change OIDC user roles. Use admin role mapping in OIDC settings instead.' },
             { status: 403 }
           );
         }

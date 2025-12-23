@@ -19,6 +19,7 @@ interface User {
   plexEmail: string;
   role: 'user' | 'admin';
   isSetupAdmin: boolean;
+  authProvider: string | null;
   avatarUrl: string | null;
   createdAt: string;
   updatedAt: string;
@@ -247,7 +248,7 @@ function AdminUsersPageContent() {
         )}
 
         {/* Users Table */}
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
             <thead className="bg-gray-50 dark:bg-gray-900">
               <tr>
@@ -287,8 +288,11 @@ function AdminUsersPageContent() {
                         <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
                           {user.plexUsername}
                         </div>
-                        <div className="text-sm text-gray-500 dark:text-gray-400">
-                          Plex ID: {user.plexId}
+                        <div
+                          className="text-sm text-gray-500 dark:text-gray-400 cursor-help"
+                          title={`Full ID: ${user.plexId}`}
+                        >
+                          ID: {user.plexId.length > 12 ? `${user.plexId.substring(0, 12)}...` : user.plexId}
                         </div>
                       </div>
                     </div>
@@ -332,6 +336,13 @@ function AdminUsersPageContent() {
                         </svg>
                         <span>Protected</span>
                       </span>
+                    ) : user.authProvider === 'oidc' ? (
+                      <span className="inline-flex items-center gap-1 text-gray-400 dark:text-gray-600 cursor-not-allowed" title="OIDC user roles are managed by the identity provider (use admin role mapping in settings)">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <span>OIDC Managed</span>
+                      </span>
                     ) : (
                       <button
                         onClick={() => showEditDialog(user)}
@@ -365,6 +376,8 @@ function AdminUsersPageContent() {
             <li>• <strong>User:</strong> Can request audiobooks, view own requests, and search the catalog</li>
             <li>• <strong>Admin:</strong> Full system access including settings, user management, and all requests</li>
             <li>• <strong>Setup Admin:</strong> The initial admin account created during setup - this account's role is protected and cannot be changed</li>
+            <li>• <strong>OIDC Users:</strong> Role management is handled by the identity provider - use admin role mapping in OIDC settings</li>
+            <li>• <strong>Local Users:</strong> Can be freely assigned user or admin roles (except setup admin)</li>
             <li>• You cannot change your own role for security reasons</li>
           </ul>
         </div>
