@@ -237,41 +237,57 @@ export async function getUserLibraryBooks(
   scope: 'full' | 'listened' | 'rated'
 ): Promise<LibraryBook[]> {
   try {
-    // Get user's Plex library configuration
     const configService = getConfigService();
-    const plexConfig = await configService.getPlexConfig();
+    const backendMode = await configService.getBackendMode();
 
-    if (!plexConfig.libraryId) {
-      console.warn('[BookDate] No Plex library ID configured');
-      return [];
+    // Early validation: audiobookshelf doesn't support ratings
+    if (backendMode === 'audiobookshelf' && scope === 'rated') {
+      console.warn('[BookDate] Audiobookshelf does not support ratings, falling back to full library');
+      scope = 'full';
     }
 
-    const plexLibraryId = plexConfig.libraryId;
+    // Get library ID based on backend mode
+    let libraryId: string;
+    if (backendMode === 'audiobookshelf') {
+      const absLibraryId = await configService.get('audiobookshelf.library_id');
+      if (!absLibraryId) {
+        console.warn('[BookDate] No Audiobookshelf library ID configured');
+        return [];
+      }
+      libraryId = absLibraryId;
+    } else {
+      // Plex mode
+      const plexConfig = await configService.getPlexConfig();
+      if (!plexConfig.libraryId) {
+        console.warn('[BookDate] No Plex library ID configured');
+        return [];
+      }
+      libraryId = plexConfig.libraryId;
+    }
 
-    // Check user type to determine query strategy for 'rated' scope
+    // Check user type for local admin detection (Plex-specific logic)
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: { plexId: true },
     });
-
     const isLocalAdmin = user?.plexId.startsWith('local-') ?? false;
 
-    // Build query filters based on scope and user type
-    let whereClause: any = { plexLibraryId };
+    // Build query filters
+    let whereClause: any = { plexLibraryId: libraryId };
     let takeLimit = 40;
 
-    if (scope === 'rated') {
+    // Apply rating filter only for Plex backend with rated scope
+    if (backendMode === 'plex' && scope === 'rated') {
       if (isLocalAdmin) {
-        // Local admin: Filter by cached ratings (these are their ratings)
+        // Local admin: Use cached ratings from system token
         whereClause.userRating = { not: null };
       } else {
-        // Plex-authenticated: Fetch more books to ensure we get 40 rated ones
-        // Don't filter by cached ratings - user's ratings may differ from system token
+        // OAuth user: Fetch more, filter after user rating enrichment
         takeLimit = 100;
       }
     }
 
-    // Query Plex library from database (cached structure, includes system token's cached ratings)
+    // Query library from database (same table for both backends)
     let cachedBooks = await prisma.plexLibrary.findMany({
       where: whereClause,
       orderBy: {
@@ -284,21 +300,31 @@ export async function getUserLibraryBooks(
         narrator: true,
         plexGuid: true,
         plexRatingKey: true,
-        userRating: true, // System token's cached ratings from scan
+        userRating: true,
       },
     });
 
-    // Enrich with user's personal ratings from Plex
-    const enrichedBooks = await enrichWithUserRatings(userId, cachedBooks);
+    // For Plex: Enrich with user's personal ratings
+    // For Audiobookshelf: Skip enrichment (no rating support)
+    if (backendMode === 'plex') {
+      const enrichedBooks = await enrichWithUserRatings(userId, cachedBooks);
 
-    // If scope is 'rated', filter to only books the user has actually rated
-    if (scope === 'rated') {
-      const ratedBooks = enrichedBooks.filter(book => book.rating != null);
-      // Limit to 40 for Plex users (local admin already limited in query)
-      return isLocalAdmin ? ratedBooks : ratedBooks.slice(0, 40);
+      // Filter to rated books if scope is 'rated'
+      if (scope === 'rated') {
+        const ratedBooks = enrichedBooks.filter(book => book.rating != null);
+        return isLocalAdmin ? ratedBooks : ratedBooks.slice(0, 40);
+      }
+
+      return enrichedBooks;
+    } else {
+      // Audiobookshelf: Map to LibraryBook without ratings
+      return cachedBooks.map(book => ({
+        title: book.title,
+        author: book.author,
+        narrator: book.narrator || undefined,
+        rating: undefined, // ABS doesn't support ratings
+      }));
     }
-
-    return enrichedBooks;
 
   } catch (error) {
     console.error('[BookDate] Error fetching library books:', error);

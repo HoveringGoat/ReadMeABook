@@ -192,8 +192,16 @@ export function InteractiveTorrentSearchModal({
                           {result.rank}
                         </td>
                         <td className="px-3 py-3 text-sm text-gray-900 dark:text-gray-100">
-                          <div className="max-w-xs lg:max-w-md truncate" title={result.title}>
-                            {result.title}
+                          <div className="max-w-xs lg:max-w-md truncate">
+                            <a
+                              href={result.guid}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 hover:underline"
+                              title={result.title}
+                            >
+                              {result.title}
+                            </a>
                           </div>
                           <div className="flex gap-2 mt-1 flex-wrap">
                             {result.format && (

@@ -1,29 +1,38 @@
 # Intelligent Ranking Algorithm
 
-**Status:** ❌ Not Implemented
+**Status:** ✅ Implemented
 
 Evaluates and scores torrents to automatically select best audiobook download.
 
 ## Scoring Criteria (100 points max)
 
-**1. Format Quality (40 pts max)**
-- M4B with chapters: 40
-- M4B without chapters: 35
-- M4A: 25
-- MP3: 15
-- Other: 5
+**1. Title/Author Match (50 pts max) - MOST IMPORTANT**
+- Title matching: 0-35 pts
+  - Exact substring match → 35 pts
+  - No exact match → fuzzy similarity (partial credit)
+- Author presence: 0-15 pts
+  - Splits authors on delimiters (comma, &, "and", " - ")
+  - Filters out roles ("translator", "narrator")
+  - Proportional credit for partial matches
+- Order-independent, no structure assumptions
+- Ensures correct book is selected over wrong book with better format
 
-**2. Seeder Count (25 pts max)**
-- Formula: `Math.min(25, Math.log10(seeders + 1) * 10)`
-- 1 seeder: 0pts, 10 seeders: 10pts, 100 seeders: 20pts, 1000+: 25pts
+**2. Format Quality (25 pts max)**
+- M4B with chapters: 25
+- M4B without chapters: 22
+- M4A: 16
+- MP3: 10
+- Other: 3
 
-**3. Size Reasonableness (20 pts max)**
+**3. Seeder Count (15 pts max)**
+- Formula: `Math.min(15, Math.log10(seeders + 1) * 6)`
+- 1 seeder: 0pts, 10 seeders: 6pts, 100 seeders: 12pts, 1000+: 15pts
+
+**4. Size Reasonableness (10 pts max)**
 - Expected: 1-2 MB/min (64-128 kbps)
-- Deviation from expected → penalty
-
-**4. Title Match Quality (15 pts max)**
-- Fuzzy match: title + author (Levenshtein distance)
-- Narrator bonus
+- Perfect match: 10 pts
+- Deviation → penalty
+- Unknown duration: 5 pts (neutral)
 
 ## Interface
 

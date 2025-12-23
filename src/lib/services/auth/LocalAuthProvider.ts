@@ -51,11 +51,12 @@ export class LocalAuthProvider implements IAuthProvider {
         return { success: false, error: 'Username and password required' };
       }
 
-      // Find user
+      // Find user (exclude soft-deleted users)
       const user = await prisma.user.findFirst({
         where: {
           plexUsername: username,
           authProvider: 'local',
+          deletedAt: null, // Exclude soft-deleted users
         },
       });
 
@@ -155,11 +156,12 @@ export class LocalAuthProvider implements IAuthProvider {
         return { success: false, error: 'Registration is disabled' };
       }
 
-      // Check username uniqueness
+      // Check username uniqueness (only among non-deleted users)
       const existing = await prisma.user.findFirst({
         where: {
           plexUsername: username,
           authProvider: 'local',
+          deletedAt: null, // Allow reuse of usernames from deleted accounts
         },
       });
 
@@ -272,6 +274,11 @@ export class LocalAuthProvider implements IAuthProvider {
       });
 
       if (!user || user.authProvider !== 'local') {
+        return false;
+      }
+
+      // Reject soft-deleted users
+      if (user.deletedAt) {
         return false;
       }
 

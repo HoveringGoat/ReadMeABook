@@ -34,13 +34,14 @@ export async function PUT(
           );
         }
 
-        // Check if user is the setup admin or OIDC user
+        // Check if user is the setup admin, OIDC user, or deleted
         const targetUser = await prisma.user.findUnique({
           where: { id },
           select: {
             isSetupAdmin: true,
             authProvider: true,
             plexUsername: true,
+            deletedAt: true,
           },
         });
 
@@ -48,6 +49,14 @@ export async function PUT(
           return NextResponse.json(
             { error: 'User not found' },
             { status: 404 }
+          );
+        }
+
+        // Prevent changing deleted users
+        if (targetUser.deletedAt) {
+          return NextResponse.json(
+            { error: 'Cannot modify a deleted user' },
+            { status: 403 }
           );
         }
 
@@ -83,6 +92,101 @@ export async function PUT(
         console.error('[Admin] Failed to update user:', error);
         return NextResponse.json(
           { error: 'Failed to update user' },
+          { status: 500 }
+        );
+      }
+    });
+  });
+}
+
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  return requireAuth(request, async (req: AuthenticatedRequest) => {
+    return requireAdmin(req, async () => {
+      try {
+        const { id } = await params;
+
+        // Prevent user from deleting themselves
+        if (req.user && id === req.user.sub) {
+          return NextResponse.json(
+            { error: 'You cannot delete your own account' },
+            { status: 403 }
+          );
+        }
+
+        // Check if user exists and get their details
+        const targetUser = await prisma.user.findUnique({
+          where: { id },
+          select: {
+            id: true,
+            plexUsername: true,
+            isSetupAdmin: true,
+            authProvider: true,
+            deletedAt: true,
+            _count: {
+              select: { requests: true },
+            },
+          },
+        });
+
+        if (!targetUser) {
+          return NextResponse.json(
+            { error: 'User not found' },
+            { status: 404 }
+          );
+        }
+
+        // Check if user is already deleted
+        if (targetUser.deletedAt) {
+          return NextResponse.json(
+            { error: 'User has already been deleted' },
+            { status: 400 }
+          );
+        }
+
+        // Prevent deleting setup admin
+        if (targetUser.isSetupAdmin) {
+          return NextResponse.json(
+            { error: 'Cannot delete the setup admin account. This account is protected.' },
+            { status: 403 }
+          );
+        }
+
+        // Only allow deleting local users (manual registration)
+        if (targetUser.authProvider !== 'local') {
+          const providerName = targetUser.authProvider === 'plex' ? 'Plex' :
+                               targetUser.authProvider === 'oidc' ? 'OIDC' :
+                               targetUser.authProvider || 'external';
+          return NextResponse.json(
+            {
+              error: `Cannot delete ${providerName} users. User access is managed by ${providerName}.`
+            },
+            { status: 403 }
+          );
+        }
+
+        // Soft-delete user (preserves their requests and history)
+        // Append timestamp to plexId to free it up for reuse (allows username reuse)
+        const timestamp = Date.now();
+        await prisma.user.update({
+          where: { id },
+          data: {
+            deletedAt: new Date(),
+            deletedBy: req.user?.sub || null,
+            plexId: `local-${targetUser.plexUsername}-deleted-${timestamp}`,
+          },
+        });
+
+        return NextResponse.json({
+          success: true,
+          message: `User "${targetUser.plexUsername}" has been deleted. Their ${targetUser._count.requests} request(s) have been preserved.`
+        });
+      } catch (error) {
+        console.error('[Admin] Failed to delete user:', error);
+        return NextResponse.json(
+          { error: 'Failed to delete user' },
           { status: 500 }
         );
       }

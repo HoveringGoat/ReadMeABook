@@ -49,6 +49,10 @@ model User {
   bookDateCustomPrompt       String? @map("bookdate_custom_prompt") @db.Text
   bookDateOnboardingComplete Boolean @default(false) @map("bookdate_onboarding_complete")
 
+  // Soft delete support
+  deletedAt DateTime? @map("deleted_at")
+  deletedBy String?   @map("deleted_by") // Admin user ID who deleted this user
+
   // Relations
   requests                Request[]
   bookDateRecommendations BookDateRecommendation[]
@@ -56,6 +60,7 @@ model User {
 
   @@index([plexId])
   @@index([role])
+  @@index([deletedAt])
   @@map("users")
 }
 

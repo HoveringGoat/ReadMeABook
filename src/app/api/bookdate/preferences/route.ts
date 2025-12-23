@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { prisma } from '@/lib/db';
+import { getConfigService } from '@/lib/services/config.service';
 
 /**
  * GET /api/bookdate/preferences
@@ -32,10 +33,24 @@ async function getPreferences(req: AuthenticatedRequest) {
       );
     }
 
+    // Add backend capability detection
+    const configService = getConfigService();
+    const backendMode = await configService.getBackendMode();
+    const supportsRatings = backendMode === 'plex';
+
+    // Override 'rated' scope if backend doesn't support it
+    let effectiveScope = user.bookDateLibraryScope || 'full';
+    if (!supportsRatings && effectiveScope === 'rated') {
+      effectiveScope = 'full';
+    }
+
     return NextResponse.json({
-      libraryScope: user.bookDateLibraryScope || 'full',
+      libraryScope: effectiveScope,
       customPrompt: user.bookDateCustomPrompt || '', // Always return empty string for UI
       onboardingComplete: user.bookDateOnboardingComplete || false,
+      backendCapabilities: {
+        supportsRatings,
+      },
     });
 
   } catch (error: any) {
@@ -63,6 +78,18 @@ async function updatePreferences(req: AuthenticatedRequest) {
     if (libraryScope && !['full', 'rated'].includes(libraryScope)) {
       return NextResponse.json(
         { error: 'Invalid library scope. Must be "full" or "rated"' },
+        { status: 400 }
+      );
+    }
+
+    // Add validation for rating support
+    const configService = getConfigService();
+    const backendMode = await configService.getBackendMode();
+    const supportsRatings = backendMode === 'plex';
+
+    if (libraryScope === 'rated' && !supportsRatings) {
+      return NextResponse.json(
+        { error: 'Your backend does not support ratings. Please select "Full Library".' },
         { status: 400 }
       );
     }

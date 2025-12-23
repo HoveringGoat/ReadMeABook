@@ -202,10 +202,10 @@ export class FileOrganizer {
 
         // Copy file (do NOT delete original - needed for seeding)
         try {
-          // Read source file (either tagged version or original)
-          const fileData = await fs.readFile(sourcePath);
-          // Write to target with explicit permissions
-          await fs.writeFile(targetFilePath, fileData, { mode: 0o644 });
+          // Copy file using streaming (handles large files >2GB)
+          await fs.copyFile(sourcePath, targetFilePath);
+          // Set explicit permissions after copy
+          await fs.chmod(targetFilePath, 0o644);
 
           result.audioFiles.push(targetFilePath);
           result.filesMovedCount++;
@@ -237,8 +237,8 @@ export class FileOrganizer {
 
         try {
           // Copy cover art (do NOT delete original)
-          const coverData = await fs.readFile(sourcePath);
-          await fs.writeFile(targetCoverPath, coverData, { mode: 0o644 });
+          await fs.copyFile(sourcePath, targetCoverPath);
+          await fs.chmod(targetCoverPath, 0o644);
           result.coverArtFile = targetCoverPath;
           result.filesMovedCount++;
           await logger?.info(`Copied cover art`);
@@ -406,8 +406,8 @@ export class FileOrganizer {
         const cachedPath = path.join('/app/cache/thumbnails', filename);
 
         // Copy from local cache instead of downloading
-        const coverData = await fs.readFile(cachedPath);
-        await fs.writeFile(targetPath, coverData, { mode: 0o644 });
+        await fs.copyFile(cachedPath, targetPath);
+        await fs.chmod(targetPath, 0o644);
         console.log(`[FileOrganizer] Copied cover art from cache: ${filename}`);
       } else {
         // Download from external URL (e.g., Audible CDN)

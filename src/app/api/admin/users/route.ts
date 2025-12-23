@@ -12,6 +12,9 @@ export async function GET(request: NextRequest) {
     return requireAdmin(req, async () => {
       try {
         const users = await prisma.user.findMany({
+          where: {
+            deletedAt: null, // Exclude soft-deleted users
+          },
           select: {
             id: true,
             plexId: true,

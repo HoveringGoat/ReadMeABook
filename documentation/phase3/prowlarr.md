@@ -14,9 +14,21 @@ Indexer aggregator for searching multiple torrent/usenet indexers simultaneously
 **GET /indexerstats** - Indexer statistics
 **GET /feed/{indexerId}/api?t=search&cat=3030&limit=100** - RSS feed for specific indexer
 
-## Search
+## Search Strategy
+
+**Search Query:** Title only (not title + author)
+- Broader search yields more results (e.g., 20 vs 1)
+- Ranking algorithm filters out mismatches using author/narrator
+- Works around indexer limitations with complex queries
 
 **Extended Search:** Enabled (`extended=1`) - searches title, tags, labels, and metadata fields
+
+**Result Filtering:**
+- Minimum score threshold: 30/100
+- Filters applied after ranking to remove poor matches
+- maxResults: 100 (increased from 50 for broader search)
+
+**Example:** "Season of Storms" → finds all "Season of Storms" torrents → ranks by author match → filters score < 30
 
 ```typescript
 interface TorrentResult {
@@ -53,13 +65,15 @@ interface TorrentResult {
 
 **Manual Search** (`POST /api/requests/{id}/manual-search`)
 - Triggers automatic search job for requests with status: pending, failed, awaiting_search
-- Searches only enabled indexers
-- Uses ranking algorithm to select best torrent
+- Searches only enabled indexers (title only, maxResults: 100)
+- Ranks all results, filters scores < 30
+- Selects best torrent from filtered results
 - Updates request status to 'pending'
 
 **Interactive Search** (`POST /api/requests/{id}/interactive-search`)
 - Returns ranked torrent results for user selection
-- Searches only enabled indexers
+- Searches only enabled indexers (title only, maxResults: 100)
+- Ranks all results, filters scores < 30
 - Shows table with: rank, title, size, quality score, seeders, indexer, publish date
 - Available for same statuses as manual search
 - User clicks "Download" button to select specific torrent

@@ -74,13 +74,16 @@ export async function POST(
 
       // Search Prowlarr for torrents - ONLY enabled indexers
       const prowlarr = await getProwlarrService();
-      const searchQuery = `${requestRecord.audiobook.title} ${requestRecord.audiobook.author}`;
+      const searchQuery = requestRecord.audiobook.title; // Title only - cast wide net
 
       console.log(`[InteractiveSearch] Searching ${enabledIndexerIds.length} enabled indexers for: ${searchQuery}`);
 
       const results = await prowlarr.search(searchQuery, {
         indexerIds: enabledIndexerIds,
+        maxResults: 100, // Increased limit for broader search
       });
+
+      console.log(`[InteractiveSearch] Found ${results.length} raw results for request ${id}`);
 
       if (results.length === 0) {
         return NextResponse.json({
@@ -96,18 +99,49 @@ export async function POST(
         author: requestRecord.audiobook.author,
       });
 
+      // Filter out results below minimum score threshold (30/100)
+      const filteredResults = rankedResults.filter(result => result.score >= 30);
+
+      console.log(`[InteractiveSearch] Ranked ${rankedResults.length} results, ${filteredResults.length} above threshold (30/100)`);
+
+      // Log top 3 results with detailed score breakdown for debugging
+      const top3 = filteredResults.slice(0, 3);
+      if (top3.length > 0) {
+        console.log(`[InteractiveSearch] ==================== RANKING DEBUG ====================`);
+        console.log(`[InteractiveSearch] Requested Title: "${requestRecord.audiobook.title}"`);
+        console.log(`[InteractiveSearch] Requested Author: "${requestRecord.audiobook.author}"`);
+        console.log(`[InteractiveSearch] Top ${top3.length} results (out of ${filteredResults.length} above threshold):`);
+        console.log(`[InteractiveSearch] --------------------------------------------------------`);
+        top3.forEach((result, index) => {
+          console.log(`[InteractiveSearch] ${index + 1}. "${result.title}"`);
+          console.log(`[InteractiveSearch]    Indexer: ${result.indexer}`);
+          console.log(`[InteractiveSearch]    Total Score: ${result.score.toFixed(1)}/100`);
+          console.log(`[InteractiveSearch]    - Title/Author Match: ${result.breakdown.matchScore.toFixed(1)}/50`);
+          console.log(`[InteractiveSearch]    - Format Quality: ${result.breakdown.formatScore.toFixed(1)}/25 (${result.format || 'unknown'})`);
+          console.log(`[InteractiveSearch]    - Seeder Count: ${result.breakdown.seederScore.toFixed(1)}/15 (${result.seeders} seeders)`);
+          console.log(`[InteractiveSearch]    - Size Score: ${result.breakdown.sizeScore.toFixed(1)}/10 (${(result.size / (1024 ** 3)).toFixed(2)} GB)`);
+          if (result.breakdown.notes.length > 0) {
+            console.log(`[InteractiveSearch]    Notes: ${result.breakdown.notes.join(', ')}`);
+          }
+          if (index < top3.length - 1) {
+            console.log(`[InteractiveSearch] --------------------------------------------------------`);
+          }
+        });
+        console.log(`[InteractiveSearch] ========================================================`);
+      }
+
       // Add rank position to each result
-      const resultsWithRank = rankedResults.map((result, index) => ({
+      const resultsWithRank = filteredResults.map((result, index) => ({
         ...result,
         rank: index + 1,
       }));
 
-      console.log(`[InteractiveSearch] Found ${resultsWithRank.length} results for request ${id}`);
-
       return NextResponse.json({
         success: true,
         results: resultsWithRank,
-        message: `Found ${resultsWithRank.length} torrents`,
+        message: filteredResults.length > 0
+          ? `Found ${filteredResults.length} quality matches`
+          : 'No quality matches found',
       });
     } catch (error) {
       console.error('Failed to perform interactive search:', error);

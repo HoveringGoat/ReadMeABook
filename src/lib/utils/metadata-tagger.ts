@@ -54,6 +54,7 @@ export async function tagAudioFileMetadata(
     // Build ffmpeg command
     const args: string[] = [
       'ffmpeg',
+      '-y', // Automatically overwrite files without prompting
       '-i', `"${filePath}"`,
       '-codec', 'copy', // No re-encoding, metadata only
     ];

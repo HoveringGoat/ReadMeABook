@@ -55,6 +55,11 @@ function AdminUsersPageContent() {
     type: 'approve' | 'reject' | null;
     user: PendingUser | null;
   }>({ isOpen: false, type: null, user: null });
+  const [deleteDialog, setDeleteDialog] = useState<{
+    isOpen: boolean;
+    user: User | null;
+  }>({ isOpen: false, user: null });
+  const [deleting, setDeleting] = useState(false);
   const toast = useToast();
 
   const isLoading = !data && !error;
@@ -127,6 +132,45 @@ function AdminUsersPageContent() {
       console.error(err);
     } finally {
       setProcessingUserId(null);
+    }
+  };
+
+  const showDeleteDialog = (user: User) => {
+    setDeleteDialog({ isOpen: true, user });
+  };
+
+  const closeDeleteDialog = () => {
+    if (deleting) return; // Don't close while processing
+    setDeleteDialog({ isOpen: false, user: null });
+  };
+
+  const handleDeleteUser = async () => {
+    if (!deleteDialog.user) return;
+
+    try {
+      setDeleting(true);
+      const response = await fetchJSON(`/api/admin/users/${deleteDialog.user.id}`, {
+        method: 'DELETE',
+      });
+      toast.success(response.message || `User "${deleteDialog.user.plexUsername}" has been deleted`);
+      mutate(); // Refresh users list
+      closeDeleteDialog();
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : 'Failed to delete user';
+      toast.error(errorMsg);
+      console.error(err);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const copyToClipboard = async (text: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success(`${label} copied to clipboard`);
+    } catch (err) {
+      console.error('Failed to copy to clipboard:', err);
+      toast.error('Failed to copy to clipboard');
     }
   };
 
@@ -289,10 +333,16 @@ function AdminUsersPageContent() {
                           {user.plexUsername}
                         </div>
                         <div
-                          className="text-sm text-gray-500 dark:text-gray-400 cursor-help"
-                          title={`Full ID: ${user.plexId}`}
+                          className="text-sm text-gray-500 dark:text-gray-400 cursor-pointer hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
+                          title={`Click to copy: ${user.plexId}`}
+                          onClick={() => copyToClipboard(user.plexId, 'User ID')}
                         >
-                          ID: {user.plexId.length > 12 ? `${user.plexId.substring(0, 12)}...` : user.plexId}
+                          <span className="inline-flex items-center gap-1">
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                            </svg>
+                            ID: {user.plexId.length > 12 ? `${user.plexId.substring(0, 12)}...` : user.plexId}
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -329,31 +379,65 @@ function AdminUsersPageContent() {
                       : 'Never'}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                    {user.isSetupAdmin ? (
-                      <span className="inline-flex items-center gap-1 text-gray-400 dark:text-gray-600 cursor-not-allowed" title="Setup admin role cannot be changed">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                        </svg>
-                        <span>Protected</span>
-                      </span>
-                    ) : user.authProvider === 'oidc' ? (
-                      <span className="inline-flex items-center gap-1 text-gray-400 dark:text-gray-600 cursor-not-allowed" title="OIDC user roles are managed by the identity provider (use admin role mapping in settings)">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                        <span>OIDC Managed</span>
-                      </span>
-                    ) : (
-                      <button
-                        onClick={() => showEditDialog(user)}
-                        className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                        </svg>
-                        <span>Edit Role</span>
-                      </button>
-                    )}
+                    <div className="flex items-center justify-end gap-3">
+                      {user.isSetupAdmin ? (
+                        <span className="inline-flex items-center gap-1 text-gray-400 dark:text-gray-600 cursor-not-allowed" title="Setup admin role cannot be changed">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                          </svg>
+                          <span>Protected</span>
+                        </span>
+                      ) : user.authProvider === 'oidc' ? (
+                        <span className="inline-flex items-center gap-1 text-gray-400 dark:text-gray-600 cursor-not-allowed" title="OIDC user roles are managed by the identity provider (use admin role mapping in settings)">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                          <span>OIDC Managed</span>
+                        </span>
+                      ) : user.authProvider === 'plex' ? (
+                        <button
+                          onClick={() => showEditDialog(user)}
+                          className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                          </svg>
+                          <span>Edit Role</span>
+                        </button>
+                      ) : user.authProvider === 'local' ? (
+                        <>
+                          <button
+                            onClick={() => showEditDialog(user)}
+                            className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                            </svg>
+                            <span>Edit Role</span>
+                          </button>
+                          <button
+                            onClick={() => showDeleteDialog(user)}
+                            className="inline-flex items-center gap-1 text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300"
+                            title="Delete user and all their requests"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                            <span>Delete</span>
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          onClick={() => showEditDialog(user)}
+                          className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                          </svg>
+                          <span>Edit Role</span>
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -370,15 +454,16 @@ function AdminUsersPageContent() {
         {/* Info Box */}
         <div className="mt-6 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
           <h3 className="text-sm font-medium text-blue-800 dark:text-blue-200 mb-2">
-            About User Roles
+            About User Management
           </h3>
           <ul className="text-sm text-blue-700 dark:text-blue-300 space-y-1">
             <li>• <strong>User:</strong> Can request audiobooks, view own requests, and search the catalog</li>
             <li>• <strong>Admin:</strong> Full system access including settings, user management, and all requests</li>
-            <li>• <strong>Setup Admin:</strong> The initial admin account created during setup - this account's role is protected and cannot be changed</li>
-            <li>• <strong>OIDC Users:</strong> Role management is handled by the identity provider - use admin role mapping in OIDC settings</li>
-            <li>• <strong>Local Users:</strong> Can be freely assigned user or admin roles (except setup admin)</li>
-            <li>• You cannot change your own role for security reasons</li>
+            <li>• <strong>Setup Admin:</strong> The initial admin account created during setup - this account is protected and cannot be changed or deleted</li>
+            <li>• <strong>OIDC Users:</strong> Role management is handled by the identity provider - use admin role mapping in OIDC settings. Cannot be deleted as access is managed externally.</li>
+            <li>• <strong>Plex Users:</strong> Can have their roles changed, but cannot be deleted as access is managed by Plex.</li>
+            <li>• <strong>Local Users:</strong> Can be freely assigned user or admin roles (except setup admin). Can be deleted (their requests are preserved for historical records).</li>
+            <li>• You cannot change your own role or delete yourself for security reasons</li>
           </ul>
         </div>
 
@@ -491,6 +576,23 @@ function AdminUsersPageContent() {
           cancelText="Cancel"
           isLoading={processingUserId !== null}
           variant={confirmDialog.type === 'reject' ? 'danger' : 'primary'}
+        />
+
+        {/* Delete User Dialog */}
+        <ConfirmModal
+          isOpen={deleteDialog.isOpen}
+          onClose={closeDeleteDialog}
+          onConfirm={handleDeleteUser}
+          title="Delete User"
+          message={
+            deleteDialog.user
+              ? `Are you sure you want to delete "${deleteDialog.user.plexUsername}"? The user will be permanently deleted, but their ${deleteDialog.user._count.requests} request(s) will be preserved for historical records. This action cannot be undone.`
+              : ''
+          }
+          confirmText="Delete User"
+          cancelText="Cancel"
+          isLoading={deleting}
+          variant="danger"
         />
       </div>
     </div>

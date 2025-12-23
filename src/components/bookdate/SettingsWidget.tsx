@@ -21,6 +21,11 @@ export function SettingsWidget({ isOpen, onClose, isOnboarding = false, onOnboar
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [backendCapabilities, setBackendCapabilities] = useState<{
+    supportsRatings: boolean;
+  }>({
+    supportsRatings: true, // Default assume Plex
+  });
 
   // Load current preferences
   useEffect(() => {
@@ -48,6 +53,7 @@ export function SettingsWidget({ isOpen, onClose, isOnboarding = false, onOnboar
       const data = await response.json();
       setLibraryScope(data.libraryScope || 'full');
       setCustomPrompt(data.customPrompt || '');
+      setBackendCapabilities(data.backendCapabilities || { supportsRatings: true });
     } catch (error: any) {
       console.error('Load preferences error:', error);
       setError(error.message || 'Failed to load preferences');
@@ -186,24 +192,34 @@ export function SettingsWidget({ isOpen, onClose, isOnboarding = false, onOnboar
                     </div>
                   </label>
 
-                  <label className={`flex items-start p-4 border-2 rounded-lg cursor-pointer transition-all hover:bg-gray-50 dark:hover:bg-gray-700/50 ${libraryScope === 'rated' ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-gray-200 dark:border-gray-600'}`}>
-                    <input
-                      type="radio"
-                      name="libraryScope"
-                      value="rated"
-                      checked={libraryScope === 'rated'}
-                      onChange={(e) => setLibraryScope(e.target.value as 'full' | 'rated')}
-                      className="mt-1 h-4 w-4 text-blue-600 focus:ring-blue-500"
-                    />
-                    <div className="ml-3 flex-1">
-                      <div className="font-medium text-gray-900 dark:text-white">
-                        Rated Books Only
+                  {/* Show "Rated Books Only" only if backend supports it */}
+                  {backendCapabilities.supportsRatings && (
+                    <label className={`flex items-start p-4 border-2 rounded-lg cursor-pointer transition-all hover:bg-gray-50 dark:hover:bg-gray-700/50 ${libraryScope === 'rated' ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-gray-200 dark:border-gray-600'}`}>
+                      <input
+                        type="radio"
+                        name="libraryScope"
+                        value="rated"
+                        checked={libraryScope === 'rated'}
+                        onChange={(e) => setLibraryScope(e.target.value as 'full' | 'rated')}
+                        className="mt-1 h-4 w-4 text-blue-600 focus:ring-blue-500"
+                      />
+                      <div className="ml-3 flex-1">
+                        <div className="font-medium text-gray-900 dark:text-white">
+                          Rated Books Only
+                        </div>
+                        <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                          Only consider books you've rated for recommendations
+                        </div>
                       </div>
-                      <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                        Only consider books you've rated for recommendations
-                      </div>
+                    </label>
+                  )}
+
+                  {/* Show info message if ratings not supported */}
+                  {!backendCapabilities.supportsRatings && (
+                    <div className="text-sm text-gray-600 dark:text-gray-400 mt-2 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                      Note: Your backend does not support user ratings. Only "Full Library" scope is available.
                     </div>
-                  </label>
+                  )}
                 </div>
               </div>
 

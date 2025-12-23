@@ -13,7 +13,8 @@ export async function GET(request: NextRequest) {
       try {
         const pendingUsers = await prisma.user.findMany({
           where: {
-            registrationStatus: 'pending_approval'
+            registrationStatus: 'pending_approval',
+            deletedAt: null, // Exclude soft-deleted users
           },
           select: {
             id: true,

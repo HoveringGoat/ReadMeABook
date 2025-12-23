@@ -52,8 +52,8 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
     // Get Prowlarr service
     const prowlarr = await getProwlarrService();
 
-    // Build search query (title + author for better results)
-    const searchQuery = `${audiobook.title} ${audiobook.author}`;
+    // Build search query (title only - cast wide net, let ranking filter)
+    const searchQuery = audiobook.title;
 
     await logger?.info(`Searching for: "${searchQuery}"`);
 
@@ -61,11 +61,11 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
     const searchResults = await prowlarr.search(searchQuery, {
       category: 3030, // Audiobooks
       minSeeders: 1, // Only torrents with at least 1 seeder
-      maxResults: 50, // Limit results
+      maxResults: 100, // Increased limit for broader search
       indexerIds: enabledIndexerIds, // Filter by enabled indexers
     });
 
-    await logger?.info(`Found ${searchResults.length} results`);
+    await logger?.info(`Found ${searchResults.length} raw results`);
 
     if (searchResults.length === 0) {
       // No results found - queue for re-search instead of failing
@@ -98,22 +98,56 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
       durationMinutes: undefined, // We don't have duration from Audible
     });
 
-    await logger?.info(`Ranked ${rankedResults.length} results`);
+    // Filter out results below minimum score threshold (30/100)
+    const filteredResults = rankedResults.filter(result => result.score >= 30);
+
+    await logger?.info(`Ranked ${rankedResults.length} results, ${filteredResults.length} above threshold (30/100)`);
+
+    if (filteredResults.length === 0) {
+      // No quality results found - queue for re-search instead of failing
+      await logger?.warn(`No quality matches found for request ${requestId} (all below 30/100), marking as awaiting_search`);
+
+      await prisma.request.update({
+        where: { id: requestId },
+        data: {
+          status: 'awaiting_search',
+          errorMessage: 'No quality matches found. Will retry automatically.',
+          lastSearchAt: new Date(),
+          updatedAt: new Date(),
+        },
+      });
+
+      return {
+        success: false,
+        message: 'No quality matches found, queued for re-search',
+        requestId,
+      };
+    }
 
     // Select best result
-    const bestResult = rankedResults[0];
+    const bestResult = filteredResults[0];
 
-    // Log top 3 results
-    const top3 = rankedResults.slice(0, 3).map((r, i) => ({
-      rank: i + 1,
-      title: r.title,
-      score: r.score,
-      breakdown: r.breakdown,
-    }));
-
-    await logger?.info(`Best result: ${bestResult.title} (score: ${bestResult.score})`, {
-      top3Results: top3,
-    });
+    // Log top 3 results with detailed breakdown
+    const top3 = filteredResults.slice(0, 3);
+    await logger?.info(`==================== RANKING DEBUG ====================`);
+    await logger?.info(`Requested Title: "${audiobook.title}"`);
+    await logger?.info(`Requested Author: "${audiobook.author}"`);
+    await logger?.info(`Top ${top3.length} results (out of ${filteredResults.length} above threshold):`);
+    await logger?.info(`--------------------------------------------------------`);
+    for (let i = 0; i < top3.length; i++) {
+      const result = top3[i];
+      await logger?.info(`${i + 1}. "${result.title}"`);
+      await logger?.info(`   Indexer: ${result.indexer}`);
+      await logger?.info(`   Total: ${result.score.toFixed(1)}/100 | Match: ${result.breakdown.matchScore.toFixed(1)}/50 | Format: ${result.breakdown.formatScore.toFixed(1)}/25 | Seeders: ${result.breakdown.seederScore.toFixed(1)}/15 | Size: ${result.breakdown.sizeScore.toFixed(1)}/10`);
+      if (result.breakdown.notes.length > 0) {
+        await logger?.info(`   Notes: ${result.breakdown.notes.join(', ')}`);
+      }
+      if (i < top3.length - 1) {
+        await logger?.info(`--------------------------------------------------------`);
+      }
+    }
+    await logger?.info(`========================================================`);
+    await logger?.info(`Selected best result: ${bestResult.title} (score: ${bestResult.score.toFixed(1)}/100)`);
 
     // Trigger download job with best result
     const jobQueue = getJobQueueService();
@@ -125,9 +159,9 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
 
     return {
       success: true,
-      message: `Found ${searchResults.length} results, selected best torrent`,
+      message: `Found ${filteredResults.length} quality matches, selected best torrent`,
       requestId,
-      resultsCount: searchResults.length,
+      resultsCount: filteredResults.length,
       selectedTorrent: {
         title: bestResult.title,
         score: bestResult.score,

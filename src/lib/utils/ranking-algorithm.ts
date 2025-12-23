@@ -122,50 +122,50 @@ export class RankingAlgorithm {
   }
 
   /**
-   * Score format quality (40 points max)
-   * M4B with chapters: 40 pts
-   * M4B without chapters: 35 pts
-   * M4A: 25 pts
-   * MP3: 15 pts
-   * Other: 5 pts
+   * Score format quality (25 points max)
+   * M4B with chapters: 25 pts
+   * M4B without chapters: 22 pts
+   * M4A: 16 pts
+   * MP3: 10 pts
+   * Other: 3 pts
    */
   private scoreFormat(torrent: TorrentResult): number {
     const format = this.detectFormat(torrent);
 
     switch (format) {
       case 'M4B':
-        return torrent.hasChapters !== false ? 40 : 35;
+        return torrent.hasChapters !== false ? 25 : 22;
       case 'M4A':
-        return 25;
+        return 16;
       case 'MP3':
-        return 15;
+        return 10;
       default:
-        return 5;
+        return 3;
     }
   }
 
   /**
-   * Score seeder count (25 points max)
+   * Score seeder count (15 points max)
    * Logarithmic scaling:
    * 1 seeder: 0 points
-   * 10 seeders: 10 points
-   * 100 seeders: 20 points
-   * 1000+ seeders: 25 points
+   * 10 seeders: 6 points
+   * 100 seeders: 12 points
+   * 1000+ seeders: 15 points
    */
   private scoreSeeders(seeders: number): number {
     if (seeders === 0) return 0;
-    return Math.min(25, Math.log10(seeders + 1) * 10);
+    return Math.min(15, Math.log10(seeders + 1) * 6);
   }
 
   /**
-   * Score size reasonableness (20 points max)
+   * Score size reasonableness (10 points max)
    * Expected: 1-2 MB per minute (64-128 kbps)
-   * Perfect match: 20 points
+   * Perfect match: 10 points
    * Too small/large: Reduced points
    */
   private scoreSize(size: number, durationMinutes?: number): number {
     if (!durationMinutes) {
-      return 10; // Neutral score if duration unknown
+      return 5; // Neutral score if duration unknown
     }
 
     // Expected size: 1-2 MB per minute
@@ -173,7 +173,7 @@ export class RankingAlgorithm {
     const maxExpected = durationMinutes * 2 * 1024 * 1024; // 2 MB/min
 
     if (size >= minExpected && size <= maxExpected) {
-      return 20; // Perfect size
+      return 10; // Perfect size
     }
 
     // Calculate deviation penalty
@@ -182,29 +182,54 @@ export class RankingAlgorithm {
         ? (minExpected - size) / minExpected
         : (size - maxExpected) / maxExpected;
 
-    return Math.max(0, 20 - deviation * 20);
+    return Math.max(0, 10 - deviation * 10);
   }
 
   /**
-   * Score title/author match quality (15 points max)
-   * Title similarity: 0-10 points
-   * Author presence: 0-5 points
+   * Score title/author match quality (50 points max)
+   * Title similarity: 0-35 points (heavily weighted!)
+   * Author presence: 0-15 points
    */
   private scoreMatch(
     torrent: TorrentResult,
     audiobook: AudiobookRequest
   ): number {
-    const title = torrent.title.toLowerCase();
+    const torrentTitle = torrent.title.toLowerCase();
     const requestTitle = audiobook.title.toLowerCase();
     const requestAuthor = audiobook.author.toLowerCase();
 
-    // Title similarity (0-10 points)
-    const titleSimilarity = compareTwoStrings(requestTitle, title) * 10;
+    // Title matching (0-35 points)
+    let titleScore = 0;
+    if (torrentTitle.includes(requestTitle)) {
+      // Exact substring match → full points
+      titleScore = 35;
+    } else {
+      // No exact match → use fuzzy similarity for partial credit
+      titleScore = compareTwoStrings(requestTitle, torrentTitle) * 35;
+    }
 
-    // Author presence (0-5 points)
-    const hasAuthor = title.includes(requestAuthor) ? 5 : 0;
+    // Author matching (0-15 points)
+    // Parse requested authors (split on separators, filter out roles)
+    const requestAuthors = requestAuthor
+      .split(/,|&| and | - /)
+      .map(a => a.trim())
+      .filter(a => a.length > 2 && !['translator', 'narrator'].includes(a));
 
-    return Math.min(15, titleSimilarity + hasAuthor);
+    // Check how many authors appear in torrent title (exact substring match)
+    const authorMatches = requestAuthors.filter(author =>
+      torrentTitle.includes(author)
+    );
+
+    let authorScore = 0;
+    if (authorMatches.length > 0) {
+      // Exact substring match → proportional credit
+      authorScore = (authorMatches.length / requestAuthors.length) * 15;
+    } else {
+      // No exact match → use fuzzy similarity for partial credit
+      authorScore = compareTwoStrings(requestAuthor, torrentTitle) * 15;
+    }
+
+    return Math.min(50, titleScore + authorScore);
   }
 
   /**
@@ -261,21 +286,25 @@ export class RankingAlgorithm {
     }
 
     // Size notes
-    if (breakdown.sizeScore < 10) {
+    if (breakdown.sizeScore < 5) {
       notes.push('⚠️ Unusual file size');
     }
 
-    // Match notes
-    if (breakdown.matchScore < 8) {
-      notes.push('⚠️ Title/author may not match well');
+    // Match notes (now worth 50 points!)
+    if (breakdown.matchScore < 20) {
+      notes.push('⚠️ Poor title/author match');
+    } else if (breakdown.matchScore < 35) {
+      notes.push('⚠️ Weak title/author match');
+    } else if (breakdown.matchScore >= 45) {
+      notes.push('✓ Excellent title/author match');
     }
 
     // Overall quality assessment
-    if (breakdown.totalScore >= 80) {
+    if (breakdown.totalScore >= 75) {
       notes.push('✓ Excellent choice');
-    } else if (breakdown.totalScore >= 60) {
+    } else if (breakdown.totalScore >= 55) {
       notes.push('✓ Good choice');
-    } else if (breakdown.totalScore < 40) {
+    } else if (breakdown.totalScore < 35) {
       notes.push('⚠️ Consider reviewing this choice');
     }
 
@@ -299,11 +328,11 @@ export function getRankingAlgorithm(): RankingAlgorithm {
 export function rankTorrents(
   torrents: TorrentResult[],
   audiobook: AudiobookRequest
-): (TorrentResult & { qualityScore: number })[] {
+): (RankedTorrent & { qualityScore: number })[] {
   const algorithm = getRankingAlgorithm();
   const ranked = algorithm.rankTorrents(torrents, audiobook);
 
-  // Return torrents with qualityScore field for compatibility
+  // Add qualityScore field for UI compatibility (rounded score)
   return ranked.map((r) => ({
     ...r,
     qualityScore: Math.round(r.score),
