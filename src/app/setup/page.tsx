@@ -73,7 +73,7 @@ interface SetupState {
   prowlarrUrl: string;
   prowlarrApiKey: string;
   prowlarrIndexers: SelectedIndexer[];
-  downloadClient: 'qbittorrent' | 'transmission';
+  downloadClient: 'qbittorrent' | 'sabnzbd';
   downloadClientUrl: string;
   downloadClientUsername: string;
   downloadClientPassword: string;

@@ -1521,7 +1521,7 @@ export default function AdminSettings() {
                     Download Client
                   </h2>
                   <p className="text-gray-600 dark:text-gray-400 mb-6">
-                    Configure your torrent download client (qBittorrent/Transmission).
+                    Configure your download client: qBittorrent for torrents or SABnzbd for Usenet/NZB downloads.
                   </p>
                 </div>
 
@@ -1541,7 +1541,7 @@ export default function AdminSettings() {
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
                   >
                     <option value="qbittorrent">qBittorrent</option>
-                    <option value="transmission">Transmission</option>
+                    <option value="sabnzbd">SABnzbd</option>
                   </select>
                 </div>
 
@@ -1563,47 +1563,79 @@ export default function AdminSettings() {
                   />
                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Username
-                  </label>
-                  <Input
-                    type="text"
-                    value={settings.downloadClient.username}
-                    onChange={(e) => {
-                      setSettings({
-                        ...settings,
-                        downloadClient: {
-                          ...settings.downloadClient,
-                          username: e.target.value,
-                        },
-                      });
-                      setValidated({ ...validated, download: false });
-                    }}
-                    placeholder="admin"
-                  />
-                </div>
+                {/* qBittorrent: Username + Password */}
+                {settings.downloadClient.type === 'qbittorrent' && (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        Username
+                      </label>
+                      <Input
+                        type="text"
+                        value={settings.downloadClient.username}
+                        onChange={(e) => {
+                          setSettings({
+                            ...settings,
+                            downloadClient: {
+                              ...settings.downloadClient,
+                              username: e.target.value,
+                            },
+                          });
+                          setValidated({ ...validated, download: false });
+                        }}
+                        placeholder="admin"
+                      />
+                    </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Password
-                  </label>
-                  <Input
-                    type="password"
-                    value={settings.downloadClient.password}
-                    onChange={(e) => {
-                      setSettings({
-                        ...settings,
-                        downloadClient: {
-                          ...settings.downloadClient,
-                          password: e.target.value,
-                        },
-                      });
-                      setValidated({ ...validated, download: false });
-                    }}
-                    placeholder="Enter password"
-                  />
-                </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        Password
+                      </label>
+                      <Input
+                        type="password"
+                        value={settings.downloadClient.password}
+                        onChange={(e) => {
+                          setSettings({
+                            ...settings,
+                            downloadClient: {
+                              ...settings.downloadClient,
+                              password: e.target.value,
+                            },
+                          });
+                          setValidated({ ...validated, download: false });
+                        }}
+                        placeholder="Enter password"
+                      />
+                    </div>
+                  </>
+                )}
+
+                {/* SABnzbd: API Key only */}
+                {settings.downloadClient.type === 'sabnzbd' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      API Key
+                    </label>
+                    <Input
+                      type="password"
+                      value={settings.downloadClient.password}
+                      onChange={(e) => {
+                        setSettings({
+                          ...settings,
+                          downloadClient: {
+                            ...settings.downloadClient,
+                            password: e.target.value,
+                          },
+                        });
+                        setValidated({ ...validated, download: false });
+                      }}
+                      placeholder="Enter SABnzbd API key"
+                    />
+                    <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                      Find this in SABnzbd under Config → General → API Key
+                    </p>
+                  </div>
+                )}
 
                 {/* SSL Verification Toggle */}
                 {settings.downloadClient.url.startsWith('https') && (

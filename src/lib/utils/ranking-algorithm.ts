@@ -331,36 +331,48 @@ export class RankingAlgorithm {
 
     // ========== STAGE 2: TITLE MATCHING (0-35 points) ==========
     let titleScore = 0;
-    if (torrentTitle.includes(requestTitle)) {
-      // Found the title, but is it the complete title or part of a longer one?
-      const titleIndex = torrentTitle.indexOf(requestTitle);
-      const beforeTitle = torrentTitle.substring(0, titleIndex);
-      const afterTitle = torrentTitle.substring(titleIndex + requestTitle.length);
 
-      // Extract significant words BEFORE the matched title
-      const beforeWords = extractWords(beforeTitle, stopWords);
+    // Try matching with full title first, then fall back to required title (without parentheses)
+    const titlesToTry = [requestTitle];
+    if (requiredTitle !== requestTitle) {
+      titlesToTry.push(requiredTitle); // Add required-only version if different
+    }
 
-      // Title is complete if:
-      // 1. No significant words before it (not "This Inevitable Ruin" + "Dungeon Crawler Carl")
-      // 2. Followed by clear metadata markers (not "'s Secret" or " Is Watching")
-      const metadataMarkers = [' by ', ' - ', ' [', ' (', ' {', ' :', ','];
-      const hasNoWordsPrefix = beforeWords.length === 0;
-      const hasMetadataSuffix = afterTitle === '' ||
-                                metadataMarkers.some(marker => afterTitle.startsWith(marker));
+    let bestMatch = false;
+    for (const titleToMatch of titlesToTry) {
+      if (torrentTitle.includes(titleToMatch)) {
+        // Found the title, but is it the complete title or part of a longer one?
+        const titleIndex = torrentTitle.indexOf(titleToMatch);
+        const beforeTitle = torrentTitle.substring(0, titleIndex);
+        const afterTitle = torrentTitle.substring(titleIndex + titleToMatch.length);
 
-      const isCompleteTitle = hasNoWordsPrefix && hasMetadataSuffix;
+        // Extract significant words BEFORE the matched title
+        const beforeWords = extractWords(beforeTitle, stopWords);
 
-      if (isCompleteTitle) {
-        // Complete title match → full points
-        titleScore = 35;
-      } else {
-        // Title has prefix words OR continues with more words
-        // This is likely a different book in a series → use fuzzy similarity
-        titleScore = compareTwoStrings(requestTitle, torrentTitle) * 35;
+        // Title is complete if:
+        // 1. No significant words before it (not "This Inevitable Ruin" + "Dungeon Crawler Carl")
+        // 2. Followed by clear metadata markers (not "'s Secret" or " Is Watching")
+        const metadataMarkers = [' by ', ' - ', ' [', ' (', ' {', ' :', ','];
+        const hasNoWordsPrefix = beforeWords.length === 0;
+        const hasMetadataSuffix = afterTitle === '' ||
+                                  metadataMarkers.some(marker => afterTitle.startsWith(marker));
+
+        const isCompleteTitle = hasNoWordsPrefix && hasMetadataSuffix;
+
+        if (isCompleteTitle) {
+          // Complete title match → full points
+          titleScore = 35;
+          bestMatch = true;
+          break; // Found a good match, stop trying
+        }
       }
-    } else {
-      // No substring match at all → use fuzzy similarity
-      titleScore = compareTwoStrings(requestTitle, torrentTitle) * 35;
+    }
+
+    if (!bestMatch) {
+      // No complete match found, use fuzzy similarity as fallback
+      // Try against full title first, then required title
+      const fuzzyScores = titlesToTry.map(title => compareTwoStrings(title, torrentTitle));
+      titleScore = Math.max(...fuzzyScores) * 35;
     }
 
     // ========== STAGE 3: AUTHOR MATCHING (0-15 points) ==========

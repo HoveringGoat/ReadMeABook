@@ -26,7 +26,7 @@ interface ReviewStepProps {
 
     // Common config
     prowlarrUrl: string;
-    downloadClient: 'qbittorrent' | 'transmission';
+    downloadClient: 'qbittorrent' | 'sabnzbd';
     downloadClientUrl: string;
     downloadDir: string;
     mediaDir: string;

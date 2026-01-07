@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 
 interface DownloadClientStepProps {
-  downloadClient: 'qbittorrent' | 'transmission';
+  downloadClient: 'qbittorrent' | 'sabnzbd';
   downloadClientUrl: string;
   downloadClientUsername: string;
   downloadClientPassword: string;
@@ -99,6 +99,11 @@ export function DownloadClientStep({
     onNext();
   };
 
+  // SABnzbd only requires URL and API key (no username)
+  const isFormValid = downloadClient === 'sabnzbd'
+    ? downloadClientUrl && downloadClientPassword // Password field stores API key for SABnzbd
+    : downloadClientUrl && downloadClientUsername && downloadClientPassword;
+
   return (
     <div className="space-y-6">
       <div>
@@ -106,7 +111,7 @@ export function DownloadClientStep({
           Configure Download Client
         </h2>
         <p className="text-gray-600 dark:text-gray-400 mt-2">
-          Choose and configure your torrent download client.
+          Choose your download client: qBittorrent for torrents or SABnzbd for Usenet/NZB downloads.
         </p>
       </div>
 
@@ -127,21 +132,21 @@ export function DownloadClientStep({
             >
               <div className="font-semibold text-gray-900 dark:text-gray-100">qBittorrent</div>
               <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                Recommended - Full feature support
+                Torrent downloads
               </div>
             </button>
             <button
               type="button"
-              onClick={() => onUpdate('downloadClient', 'transmission')}
+              onClick={() => onUpdate('downloadClient', 'sabnzbd')}
               className={`p-4 border-2 rounded-lg text-left transition-colors ${
-                downloadClient === 'transmission'
+                downloadClient === 'sabnzbd'
                   ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
                   : 'border-gray-300 dark:border-gray-600 hover:border-gray-400'
               }`}
             >
-              <div className="font-semibold text-gray-900 dark:text-gray-100">Transmission</div>
+              <div className="font-semibold text-gray-900 dark:text-gray-100">SABnzbd</div>
               <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                Coming soon
+                Usenet/NZB downloads
               </div>
             </button>
           </div>
@@ -149,11 +154,11 @@ export function DownloadClientStep({
 
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-            {downloadClient === 'qbittorrent' ? 'qBittorrent' : 'Transmission'} URL
+            {downloadClient === 'qbittorrent' ? 'qBittorrent' : 'SABnzbd'} URL
           </label>
           <Input
             type="url"
-            placeholder={downloadClient === 'qbittorrent' ? 'http://localhost:8080' : 'http://localhost:9091'}
+            placeholder={downloadClient === 'qbittorrent' ? 'http://localhost:8080' : 'http://localhost:8080/sabnzbd'}
             value={downloadClientUrl}
             onChange={(e) => onUpdate('downloadClientUrl', e.target.value)}
           />
@@ -162,31 +167,53 @@ export function DownloadClientStep({
           </p>
         </div>
 
-        <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-            Username
-          </label>
-          <Input
-            type="text"
-            placeholder="admin"
-            value={downloadClientUsername}
-            onChange={(e) => onUpdate('downloadClientUsername', e.target.value)}
-            autoComplete="username"
-          />
-        </div>
+        {downloadClient === 'qbittorrent' && (
+          <>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Username
+              </label>
+              <Input
+                type="text"
+                placeholder="admin"
+                value={downloadClientUsername}
+                onChange={(e) => onUpdate('downloadClientUsername', e.target.value)}
+                autoComplete="username"
+              />
+            </div>
 
-        <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-            Password
-          </label>
-          <Input
-            type="password"
-            placeholder="Enter password"
-            value={downloadClientPassword}
-            onChange={(e) => onUpdate('downloadClientPassword', e.target.value)}
-            autoComplete="current-password"
-          />
-        </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Password
+              </label>
+              <Input
+                type="password"
+                placeholder="Enter password"
+                value={downloadClientPassword}
+                onChange={(e) => onUpdate('downloadClientPassword', e.target.value)}
+                autoComplete="current-password"
+              />
+            </div>
+          </>
+        )}
+
+        {downloadClient === 'sabnzbd' && (
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              API Key
+            </label>
+            <Input
+              type="password"
+              placeholder="Enter SABnzbd API key"
+              value={downloadClientPassword}
+              onChange={(e) => onUpdate('downloadClientPassword', e.target.value)}
+              autoComplete="off"
+            />
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+              Find this in SABnzbd under Config → General → API Key
+            </p>
+          </div>
+        )}
 
         {/* SSL Verification Toggle */}
         {downloadClientUrl.startsWith('https') && (
@@ -215,7 +242,7 @@ export function DownloadClientStep({
           </div>
         )}
 
-        {/* Remote Path Mapping */}
+        {/* Remote Path Mapping (only for clients that download to filesystem) */}
         <div className="mt-4 bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
           <div className="flex items-start gap-4">
             <input
@@ -233,7 +260,7 @@ export function DownloadClientStep({
                 Enable Remote Path Mapping
               </label>
               <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                Use this when qBittorrent runs on a different machine or uses different mount points (e.g., remote seedbox, Docker containers)
+                Use this when {downloadClient === 'qbittorrent' ? 'qBittorrent' : 'SABnzbd'} runs on a different machine or uses different mount points (e.g., remote seedbox, Docker containers)
               </p>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-2 font-mono">
                 Example: Remote <span className="text-blue-600 dark:text-blue-400">/remote/mnt/d/done</span> → Local <span className="text-green-600 dark:text-green-400">/downloads</span>
@@ -244,7 +271,7 @@ export function DownloadClientStep({
                 <div className="mt-4 space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Remote Path (from qBittorrent)
+                      Remote Path (from {downloadClient === 'qbittorrent' ? 'qBittorrent' : 'SABnzbd'})
                     </label>
                     <Input
                       type="text"
@@ -253,7 +280,7 @@ export function DownloadClientStep({
                       onChange={(e) => onUpdate('remotePath', e.target.value)}
                     />
                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                      The path prefix as reported by qBittorrent
+                      The path prefix as reported by {downloadClient === 'qbittorrent' ? 'qBittorrent' : 'SABnzbd'}
                     </p>
                   </div>
 
@@ -280,7 +307,7 @@ export function DownloadClientStep({
         <Button
           onClick={testConnection}
           loading={testing}
-          disabled={!downloadClientUrl || !downloadClientUsername || !downloadClientPassword}
+          disabled={!isFormValid}
           variant="outline"
           className="w-full"
         >
@@ -359,12 +386,12 @@ export function DownloadClientStep({
           </svg>
           <div>
             <p className="text-sm font-medium text-blue-900 dark:text-blue-100">
-              {downloadClient === 'qbittorrent' ? 'qBittorrent Setup' : 'Transmission Setup'}
+              {downloadClient === 'qbittorrent' ? 'qBittorrent Setup' : 'SABnzbd Setup'}
             </p>
             <p className="text-sm text-blue-700 dark:text-blue-300 mt-1">
               {downloadClient === 'qbittorrent'
                 ? 'Make sure Web UI is enabled in qBittorrent settings (Tools → Options → Web UI)'
-                : 'Transmission support is coming soon. Please use qBittorrent for now.'}
+                : 'Make sure SABnzbd is running and the API key is configured (Config → General → API Key)'}
             </p>
           </div>
         </div>

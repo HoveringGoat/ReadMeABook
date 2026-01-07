@@ -1,16 +1,19 @@
 /**
- * Component: Download Torrent Job Processor
+ * Component: Download Job Processor
  * Documentation: documentation/phase3/README.md
  */
 
 import { DownloadTorrentPayload, getJobQueueService } from '../services/job-queue.service';
 import { prisma } from '../db';
 import { getQBittorrentService } from '../integrations/qbittorrent.service';
+import { getSABnzbdService } from '../integrations/sabnzbd.service';
+import { getConfigService } from '../services/config.service';
 import { createJobLogger } from '../utils/job-logger';
 
 /**
- * Process download torrent job
- * Adds selected torrent to download client and starts monitoring
+ * Process download job
+ * Routes to appropriate download client based on configuration
+ * Adds selected result to download client and starts monitoring
  */
 export async function processDownloadTorrent(payload: DownloadTorrentPayload): Promise<any> {
   const { requestId, audiobook, torrent, jobId } = payload;
@@ -18,7 +21,7 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload): P
   const logger = jobId ? createJobLogger(jobId, 'DownloadTorrent') : null;
 
   await logger?.info(`Processing request ${requestId} for "${audiobook.title}"`);
-  await logger?.info(`Selected torrent: ${torrent.title}`, {
+  await logger?.info(`Selected result: ${torrent.title}`, {
     size: torrent.size,
     seeders: torrent.seeders,
     format: torrent.format,
@@ -36,69 +39,135 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload): P
       },
     });
 
-    // Get qBittorrent service
-    const qbt = await getQBittorrentService();
+    // Get configured download client type
+    const config = await getConfigService();
+    const clientType = (await config.get('download_client_type')) || 'qbittorrent';
 
-    // Add torrent to qBittorrent
-    await logger?.info(`Adding torrent to qBittorrent`);
+    let downloadClientId: string;
+    let downloadClient: 'qbittorrent' | 'sabnzbd';
 
-    const torrentHash = await qbt.addTorrent(torrent.downloadUrl, {
-      category: 'readmeabook',
-      tags: ['audiobook'], // Generic tag for all audiobooks
-      sequentialDownload: true, // Download in order for potential streaming
-      paused: false, // Start immediately
-    });
+    if (clientType === 'sabnzbd') {
+      // Route to SABnzbd
+      await logger?.info(`Routing to SABnzbd`);
 
-    await logger?.info(`Torrent added with hash: ${torrentHash}`);
+      const sabnzbd = await getSABnzbdService();
+      downloadClientId = await sabnzbd.addNZB(torrent.downloadUrl, {
+        category: 'readmeabook',
+        priority: 'normal',
+      });
+      downloadClient = 'sabnzbd';
 
-    // Create DownloadHistory record
-    const downloadHistory = await prisma.downloadHistory.create({
-      data: {
+      await logger?.info(`NZB added with ID: ${downloadClientId}`);
+
+      // Create DownloadHistory record
+      const downloadHistory = await prisma.downloadHistory.create({
+        data: {
+          requestId,
+          indexerName: torrent.indexer,
+          downloadClient: 'sabnzbd',
+          downloadClientId,
+          torrentName: torrent.title,
+          nzbId: downloadClientId, // Store NZB ID
+          torrentSizeBytes: torrent.size,
+          torrentUrl: torrent.guid, // Source URL
+          magnetLink: torrent.downloadUrl, // Download URL (.nzb file)
+          seeders: torrent.seeders || 0, // Usenet doesn't have seeders, but include for consistency
+          leechers: 0,
+          downloadStatus: 'downloading',
+          selected: true,
+          startedAt: new Date(),
+        },
+      });
+
+      await logger?.info(`Created download history record: ${downloadHistory.id}`);
+
+      // Trigger monitor download job with initial delay
+      const jobQueue = getJobQueueService();
+      await jobQueue.addMonitorJob(
         requestId,
-        indexerName: torrent.indexer,
-        downloadClient: 'qbittorrent',
-        downloadClientId: torrentHash,
-        torrentName: torrent.title,
-        torrentHash: torrent.infoHash || torrentHash,
-        torrentSizeBytes: torrent.size,
-        torrentUrl: torrent.guid, // Source URL for the torrent page
-        magnetLink: torrent.downloadUrl, // Download URL (magnet or .torrent)
-        seeders: torrent.seeders,
-        leechers: torrent.leechers || 0,
-        downloadStatus: 'downloading',
-        selected: true,
-        startedAt: new Date(),
-      },
-    });
+        downloadHistory.id,
+        downloadClientId,
+        'sabnzbd',
+        3 // Wait 3 seconds before first check
+      );
 
-    await logger?.info(`Created download history record: ${downloadHistory.id}`);
+      await logger?.info(`Started monitoring job for request ${requestId} (SABnzbd, 3s initial delay)`);
 
-    // Trigger monitor download job with initial delay
-    // qBittorrent needs a few seconds to process the torrent before it's available via API
-    const jobQueue = getJobQueueService();
-    await jobQueue.addMonitorJob(
-      requestId,
-      downloadHistory.id,
-      torrentHash,
-      'qbittorrent',
-      3 // Wait 3 seconds before first check to avoid race condition
-    );
+      return {
+        success: true,
+        message: 'NZB added to SABnzbd and monitoring started',
+        requestId,
+        downloadHistoryId: downloadHistory.id,
+        nzbId: downloadClientId,
+        torrent: {
+          title: torrent.title,
+          size: torrent.size,
+          format: torrent.format,
+        },
+      };
+    } else {
+      // Route to qBittorrent (default)
+      await logger?.info(`Routing to qBittorrent`);
 
-    await logger?.info(`Started monitoring job for request ${requestId} (3s initial delay)`);
+      const qbt = await getQBittorrentService();
+      downloadClientId = await qbt.addTorrent(torrent.downloadUrl, {
+        category: 'readmeabook',
+        tags: ['audiobook'],
+        sequentialDownload: true,
+        paused: false,
+      });
+      downloadClient = 'qbittorrent';
 
-    return {
-      success: true,
-      message: 'Torrent added to download client and monitoring started',
-      requestId,
-      downloadHistoryId: downloadHistory.id,
-      torrentHash,
-      torrent: {
-        title: torrent.title,
-        size: torrent.size,
-        seeders: torrent.seeders,
-        format: torrent.format,
-      },
-    };
+      await logger?.info(`Torrent added with hash: ${downloadClientId}`);
+
+      // Create DownloadHistory record
+      const downloadHistory = await prisma.downloadHistory.create({
+        data: {
+          requestId,
+          indexerName: torrent.indexer,
+          downloadClient: 'qbittorrent',
+          downloadClientId,
+          torrentName: torrent.title,
+          torrentHash: torrent.infoHash || downloadClientId, // Store torrent hash
+          torrentSizeBytes: torrent.size,
+          torrentUrl: torrent.guid,
+          magnetLink: torrent.downloadUrl,
+          seeders: torrent.seeders,
+          leechers: torrent.leechers || 0,
+          downloadStatus: 'downloading',
+          selected: true,
+          startedAt: new Date(),
+        },
+      });
+
+      await logger?.info(`Created download history record: ${downloadHistory.id}`);
+
+      // Trigger monitor download job with initial delay
+      const jobQueue = getJobQueueService();
+      await jobQueue.addMonitorJob(
+        requestId,
+        downloadHistory.id,
+        downloadClientId,
+        'qbittorrent',
+        3 // Wait 3 seconds before first check to avoid race condition
+      );
+
+      await logger?.info(`Started monitoring job for request ${requestId} (qBittorrent, 3s initial delay)`);
+
+      return {
+        success: true,
+        message: 'Torrent added to qBittorrent and monitoring started',
+        requestId,
+        downloadHistoryId: downloadHistory.id,
+        torrentHash: downloadClientId,
+        torrent: {
+          title: torrent.title,
+          size: torrent.size,
+          seeders: torrent.seeders,
+          format: torrent.format,
+        },
+      };
+    }
   } catch (error) {
     await logger?.error(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
 
@@ -107,7 +176,7 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload): P
       where: { id: requestId },
       data: {
         status: 'failed',
-        errorMessage: error instanceof Error ? error.message : 'Failed to add torrent to download client',
+        errorMessage: error instanceof Error ? error.message : 'Failed to add download to client',
         updatedAt: new Date(),
       },
     });

@@ -58,16 +58,51 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
   const logger = jobId ? createJobLogger(jobId, 'MonitorDownload') : null;
 
   try {
-    // Get download client service (currently only qBittorrent supported)
-    if (downloadClient !== 'qbittorrent') {
-      throw new Error(`Download client ${downloadClient} not yet supported`);
+    let progress: any;
+    let downloadPath: string | undefined;
+
+    if (downloadClient === 'qbittorrent') {
+      // qBittorrent flow
+      const qbt = await getQBittorrentService();
+
+      // Get torrent status with retry logic (handles race condition)
+      const torrent = await getTorrentWithRetry(qbt, downloadClientId, logger);
+      progress = qbt.getDownloadProgress(torrent);
+
+      // Store download path for later use
+      downloadPath = torrent.content_path || path.join(torrent.save_path, torrent.name);
+    } else if (downloadClient === 'sabnzbd') {
+      // SABnzbd flow
+      const { getSABnzbdService } = await import('../integrations/sabnzbd.service');
+      const sabnzbd = await getSABnzbdService();
+
+      // Get NZB status
+      const nzbInfo = await sabnzbd.getNZB(downloadClientId);
+
+      if (!nzbInfo) {
+        throw new Error(`NZB ${downloadClientId} not found in SABnzbd queue or history`);
+      }
+
+      // Convert NZBInfo to progress format
+      progress = {
+        percent: nzbInfo.progress,
+        bytesDownloaded: nzbInfo.size * nzbInfo.progress,
+        bytesTotal: nzbInfo.size,
+        speed: nzbInfo.downloadSpeed,
+        eta: nzbInfo.timeLeft,
+        state: nzbInfo.status,
+      };
+
+      // Store download path if available (only set after completion)
+      downloadPath = nzbInfo.downloadPath;
+
+      await logger?.info(`SABnzbd status: ${nzbInfo.status}`, {
+        progress: `${(nzbInfo.progress * 100).toFixed(1)}%`,
+        speed: `${(nzbInfo.downloadSpeed / 1024 / 1024).toFixed(2)} MB/s`,
+      });
+    } else {
+      throw new Error(`Download client ${downloadClient} not supported`);
     }
-
-    const qbt = await getQBittorrentService();
-
-    // Get torrent status with retry logic (handles race condition)
-    const torrent = await getTorrentWithRetry(qbt, downloadClientId, logger);
-    const progress = qbt.getDownloadProgress(torrent);
 
     // Update request progress
     await prisma.request.update({
@@ -90,15 +125,10 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
     if (progress.state === 'completed') {
       await logger?.info(`Download completed for request ${requestId}`);
 
-      // Get torrent files to find download path
-      const files = await qbt.getFiles(downloadClientId);
-
-      // Determine actual content path for file organization
-      // Priority 1: Use content_path if provided by qBittorrent (most reliable)
-      // Priority 2: Construct path using path.join() for proper normalization
-      const qbPath = torrent.content_path
-        ? torrent.content_path
-        : path.join(torrent.save_path, torrent.name);
+      // Ensure we have a download path
+      if (!downloadPath) {
+        throw new Error('Download path not available from download client');
+      }
 
       // Load path mapping configuration
       const configService = getConfigService();
@@ -109,19 +139,16 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
       ]);
 
       // Apply remote-to-local path transformation if enabled
-      const organizePath = PathMapper.transform(qbPath, {
+      const organizePath = PathMapper.transform(downloadPath, {
         enabled: pathMappingConfig.download_client_remote_path_mapping_enabled === 'true',
         remotePath: pathMappingConfig.download_client_remote_path || '',
         localPath: pathMappingConfig.download_client_local_path || '',
       });
 
       await logger?.info(`Download completed`, {
-        filesCount: files.length,
-        torrentName: torrent.name,
-        savePath: torrent.save_path,
-        contentPath: torrent.content_path || '(not provided)',
-        qbittorrentPath: qbPath,
-        organizePath: organizePath !== qbPath ? `${organizePath} (mapped)` : organizePath,
+        downloadClient,
+        downloadPath,
+        organizePath: organizePath !== downloadPath ? `${organizePath} (mapped)` : organizePath,
       });
 
       // Update download history to completed

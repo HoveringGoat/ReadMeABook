@@ -51,7 +51,7 @@ export interface MonitorDownloadPayload extends JobPayload {
   requestId: string;
   downloadHistoryId: string;
   downloadClientId: string;
-  downloadClient: 'qbittorrent' | 'transmission';
+  downloadClient: 'qbittorrent' | 'sabnzbd';
 }
 
 export interface OrganizeFilesPayload extends JobPayload {
@@ -479,7 +479,7 @@ export class JobQueueService {
     requestId: string,
     downloadHistoryId: string,
     downloadClientId: string,
-    downloadClient: 'qbittorrent' | 'transmission',
+    downloadClient: 'qbittorrent' | 'sabnzbd',
     delaySeconds: number = 0
   ): Promise<string> {
     return await this.addJob(

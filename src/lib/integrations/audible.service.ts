@@ -70,9 +70,9 @@ export class AudibleService {
 
           const $el = $(element);
 
-          // Extract ASIN from data attribute or link
+          // Extract ASIN from data attribute or link - handle both /pd/ and /ac/ URLs
           const asin = $el.find('li').attr('data-asin') ||
-                       $el.find('a').attr('href')?.match(/\/pd\/[^\/]+\/([A-Z0-9]{10})/)?.[1] || '';
+                       $el.find('a').attr('href')?.match(/\/(?:pd|ac)\/[^\/]+\/([A-Z0-9]{10})/)?.[1] || '';
 
           if (!asin) return;
 
@@ -156,8 +156,9 @@ export class AudibleService {
 
           const $el = $(element);
 
+          // Extract ASIN from data attribute or link - handle both /pd/ and /ac/ URLs
           const asin = $el.find('li').attr('data-asin') ||
-                       $el.find('a').attr('href')?.match(/\/pd\/[^\/]+\/([A-Z0-9]{10})/)?.[1] || '';
+                       $el.find('a').attr('href')?.match(/\/(?:pd|ac)\/[^\/]+\/([A-Z0-9]{10})/)?.[1] || '';
 
           if (!asin) return;
 
@@ -231,29 +232,42 @@ export class AudibleService {
 
       const audiobooks: AudibleAudiobook[] = [];
 
-      // Parse search results
-      $('.productListItem').each((index, element) => {
+      // Parse search results - Audible uses s-result-item for search pages
+      $('.s-result-item, .productListItem').each((index, element) => {
         const $el = $(element);
 
+        // Extract ASIN from product detail link - handle both /pd/ and /ac/ URLs
         const asin = $el.find('li').attr('data-asin') ||
-                     $el.find('a').attr('href')?.match(/\/pd\/[^\/]+\/([A-Z0-9]{10})/)?.[1] || '';
+                     $el.find('a[href*="/pd/"]').attr('href')?.match(/\/pd\/[^\/]+\/([A-Z0-9]{10})/)?.[1] ||
+                     $el.find('a[href*="/ac/"]').attr('href')?.match(/\/ac\/[^\/]+\/([A-Z0-9]{10})/)?.[1] ||
+                     $el.find('a').attr('href')?.match(/\/(?:pd|ac)\/[^\/]+\/([A-Z0-9]{10})/)?.[1] || '';
 
         if (!asin) return;
 
-        const title = $el.find('h3 a').text().trim() ||
+        // Extract title from h2 tag (search results) or h3 (legacy)
+        const title = $el.find('h2').first().text().trim() ||
+                      $el.find('h3 a').text().trim() ||
                       $el.find('.bc-heading a').text().trim();
 
-        const authorText = $el.find('.authorLabel').text().trim() ||
+        // Extract author from author link
+        const authorText = $el.find('a[href*="/author/"]').first().text().trim() ||
+                           $el.find('.authorLabel').text().trim() ||
                            $el.find('.bc-size-small .bc-text-bold').first().text().trim();
 
-        const narratorText = $el.find('.narratorLabel').text().trim();
+        // Extract narrator from narrator search link
+        const narratorText = $el.find('a[href*="searchNarrator="]').first().text().trim() ||
+                             $el.find('.narratorLabel').text().trim();
 
         const coverArtUrl = $el.find('img').attr('src') || '';
 
-        const runtimeText = $el.find('.runtimeLabel').text().trim();
+        // Extract runtime/duration
+        const runtimeText = $el.find('.runtimeLabel').text().trim() ||
+                           $el.find('span:contains("Length:")').text().trim();
         const durationMinutes = this.parseRuntime(runtimeText);
 
-        const ratingText = $el.find('.ratingsLabel').text().trim();
+        // Extract rating
+        const ratingText = $el.find('.ratingsLabel').text().trim() ||
+                          $el.find('.a-icon-star span').first().text().trim();
         const rating = ratingText ? parseFloat(ratingText.split(' ')[0]) : undefined;
 
         audiobooks.push({

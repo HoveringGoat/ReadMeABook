@@ -23,19 +23,29 @@ export async function PUT(request: NextRequest) {
           localPath,
         } = await request.json();
 
-        if (!type || !url || !username || !password) {
+        // Validate type
+        if (type !== 'qbittorrent' && type !== 'sabnzbd') {
           return NextResponse.json(
-            { error: 'Type, URL, username, and password are required' },
+            { error: 'Invalid client type. Must be qbittorrent or sabnzbd' },
             { status: 400 }
           );
         }
 
-        // Validate type
-        if (type !== 'qbittorrent' && type !== 'transmission') {
-          return NextResponse.json(
-            { error: 'Invalid client type. Must be qbittorrent or transmission' },
-            { status: 400 }
-          );
+        // Validate required fields (SABnzbd only needs URL and API key)
+        if (type === 'sabnzbd') {
+          if (!url || !password) {
+            return NextResponse.json(
+              { error: 'URL and API key (password) are required for SABnzbd' },
+              { status: 400 }
+            );
+          }
+        } else if (type === 'qbittorrent') {
+          if (!url || !username || !password) {
+            return NextResponse.json(
+              { error: 'URL, username, and password are required for qBittorrent' },
+              { status: 400 }
+            );
+          }
         }
 
         // Validate path mapping if enabled
@@ -127,9 +137,14 @@ export async function PUT(request: NextRequest) {
 
         console.log('[Admin] Download client settings updated');
 
-        // Invalidate qBittorrent service singleton to force reload of credentials and URL
-        const { invalidateQBittorrentService } = await import('@/lib/integrations/qbittorrent.service');
-        invalidateQBittorrentService();
+        // Invalidate download client service singleton to force reload of credentials and URL
+        if (type === 'qbittorrent') {
+          const { invalidateQBittorrentService } = await import('@/lib/integrations/qbittorrent.service');
+          invalidateQBittorrentService();
+        } else if (type === 'sabnzbd') {
+          const { invalidateSABnzbdService } = await import('@/lib/integrations/sabnzbd.service');
+          invalidateSABnzbdService();
+        }
 
         return NextResponse.json({
           success: true,

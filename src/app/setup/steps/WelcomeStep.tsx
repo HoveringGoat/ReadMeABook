@@ -98,10 +98,10 @@ export function WelcomeStep({ onNext }: WelcomeStepProps) {
             </svg>
             <div>
               <strong className="text-gray-900 dark:text-gray-100">
-                qBittorrent or Transmission
+                qBittorrent or SABnzbd
               </strong>
               <p className="text-sm text-gray-600 dark:text-gray-400">
-                Download client for managing torrent downloads (URL and credentials)
+                Download client for torrents (qBittorrent) or Usenet/NZB (SABnzbd)
               </p>
             </div>
           </li>

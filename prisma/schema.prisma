@@ -238,6 +238,7 @@ model DownloadHistory {
   indexerName      String    @map("indexer_name")
   torrentName      String?   @map("torrent_name")
   torrentHash      String?   @map("torrent_hash")
+  nzbId            String?   @map("nzb_id") // SABnzbd NZB ID (mutually exclusive with torrentHash)
   torrentSizeBytes BigInt?   @map("torrent_size_bytes")
   magnetLink       String?   @map("magnet_link") @db.Text
   torrentUrl       String?   @map("torrent_url") @db.Text
@@ -245,7 +246,7 @@ model DownloadHistory {
   leechers         Int?
   qualityScore     Int?      @map("quality_score")
   selected         Boolean   @default(false)
-  downloadClient   String?   @map("download_client") // qbittorrent, transmission
+  downloadClient   String?   @map("download_client") // qbittorrent, sabnzbd
   downloadClientId String?   @map("download_client_id")
   downloadStatus   String?   @map("download_status")
   // Status values: queued, downloading, completed, failed, stalled
@@ -259,6 +260,8 @@ model DownloadHistory {
 
   @@index([requestId])
   @@index([selected])
+  @@index([torrentHash])
+  @@index([nzbId])
   @@index([createdAt(sort: Desc)])
   @@map("download_history")
 }

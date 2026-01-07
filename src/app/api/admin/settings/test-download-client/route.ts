@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { prisma } from '@/lib/db';
 import { QBittorrentService } from '@/lib/integrations/qbittorrent.service';
+import { SABnzbdService } from '@/lib/integrations/sabnzbd.service';
 
 export async function POST(request: NextRequest) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
@@ -23,30 +24,30 @@ export async function POST(request: NextRequest) {
           localPath,
         } = await request.json();
 
-        if (!type || !url || !username || !password) {
+        if (!type || !url) {
           return NextResponse.json(
-            { success: false, error: 'All fields are required' },
+            { success: false, error: 'Type and URL are required' },
             { status: 400 }
           );
         }
 
-        if (type !== 'qbittorrent') {
+        if (type !== 'qbittorrent' && type !== 'sabnzbd') {
           return NextResponse.json(
-            { success: false, error: 'Only qBittorrent is currently supported' },
+            { success: false, error: 'Invalid client type. Must be qbittorrent or sabnzbd' },
             { status: 400 }
           );
         }
 
         // If password is masked, fetch the actual value from database
         let actualPassword = password;
-        if (password.startsWith('••••')) {
+        if (password && password.startsWith('••••')) {
           const storedPassword = await prisma.configuration.findUnique({
             where: { key: 'download_client_password' },
           });
 
           if (!storedPassword?.value) {
             return NextResponse.json(
-              { success: false, error: 'No stored password found. Please re-enter your download client password.' },
+              { success: false, error: 'No stored password/API key found. Please re-enter it.' },
               { status: 400 }
             );
           }
@@ -54,13 +55,48 @@ export async function POST(request: NextRequest) {
           actualPassword = storedPassword.value;
         }
 
-        // Test connection with credentials
-        const version = await QBittorrentService.testConnectionWithCredentials(
-          url,
-          username,
-          actualPassword,
-          disableSSLVerify || false
-        );
+        // Validate required fields per client type and test connection
+        let version: string | undefined;
+
+        if (type === 'qbittorrent') {
+          if (!username || !actualPassword) {
+            return NextResponse.json(
+              { success: false, error: 'Username and password are required for qBittorrent' },
+              { status: 400 }
+            );
+          }
+
+          // Test qBittorrent connection
+          version = await QBittorrentService.testConnectionWithCredentials(
+            url,
+            username,
+            actualPassword,
+            disableSSLVerify || false
+          );
+        } else if (type === 'sabnzbd') {
+          if (!actualPassword) {
+            return NextResponse.json(
+              { success: false, error: 'API key (password) is required for SABnzbd' },
+              { status: 400 }
+            );
+          }
+
+          // Test SABnzbd connection
+          const sabnzbd = new SABnzbdService(url, actualPassword, 'readmeabook', disableSSLVerify || false);
+          const result = await sabnzbd.testConnection();
+
+          if (!result.success) {
+            return NextResponse.json(
+              {
+                success: false,
+                error: result.error || 'Failed to connect to SABnzbd',
+              },
+              { status: 500 }
+            );
+          }
+
+          version = result.version;
+        }
 
         // If path mapping enabled, validate local path exists
         if (remotePathMappingEnabled) {

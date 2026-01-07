@@ -144,3 +144,25 @@ interface EnrichedAudibleAudiobook extends AudibleAudiobook {
 - Redis (caching, optional)
 - Database (PostgreSQL)
 - string-similarity (matching)
+
+## Fixed Issues
+
+**Search returning empty results (2026-01-07)**
+- **Problem:** Audible changed HTML structure for search results from `.productListItem` to `.s-result-item`
+- **Impact:** All search queries returned 0 results
+- **Fix:** Updated `search()` method to support both `.s-result-item` (current) and `.productListItem` (legacy)
+- **Selectors updated:**
+  - Main: `.s-result-item, .productListItem`
+  - Title: `h2` (new) or `h3 a` (legacy)
+  - Author: `a[href*="/author/"]` (new) or `.authorLabel` (legacy)
+  - Narrator: `a[href*="searchNarrator="]` (new) or `.narratorLabel` (legacy)
+  - Runtime: `span:contains("Length:")` (new) or `.runtimeLabel` (legacy)
+  - Rating: `.a-icon-star span` (new) or `.ratingsLabel` (legacy)
+- **Location:** `src/lib/integrations/audible.service.ts:235`
+
+**Some audiobooks missing from search results (2026-01-07)**
+- **Problem:** ASIN extraction only matched `/pd/` URLs but some audiobooks use `/ac/` URLs
+- **Impact:** Books like "Beatitude" by DJ Krimmer (ASIN: B0DVH7XL36) were skipped
+- **Fix:** Updated ASIN regex to match both `/pd/` and `/ac/` URL patterns: `/\/(?:pd|ac)\/[^\/]+\/([A-Z0-9]{10})/`
+- **Location:** `src/lib/integrations/audible.service.ts:75, 161, 240`
+- **Affects:** `getPopularAudiobooks()`, `getNewReleases()`, `search()` methods

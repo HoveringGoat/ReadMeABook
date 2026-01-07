@@ -114,8 +114,10 @@ export class ProwlarrService {
         .map((result: ProwlarrSearchResult) => this.transformResult(result))
         .filter((result: TorrentResult | null) => result !== null) as TorrentResult[];
 
-      // Apply filters
-      let filtered = results;
+      // Filter by protocol based on configured download client
+      let filtered = await this.filterByProtocol(results);
+
+      // Apply additional filters
 
       if (filters?.minSeeders) {
         filtered = filtered.filter((r) => r.seeders >= (filters.minSeeders || 0));
@@ -291,6 +293,58 @@ export class ProwlarrService {
     console.log(`RSS feeds from ${indexerIds.length} indexers returned ${allResults.length} total results`);
 
     return allResults;
+  }
+
+  /**
+   * Filter results based on configured download client protocol
+   * If qBittorrent is configured: only return torrent results
+   * If SABnzbd is configured: only return NZB results
+   */
+  private async filterByProtocol(results: TorrentResult[]): Promise<TorrentResult[]> {
+    try {
+      // Get configured download client type
+      const { getConfigService } = await import('../services/config.service');
+      const config = await getConfigService();
+      const clientType = (await config.get('download_client_type')) || 'qbittorrent';
+
+      if (clientType === 'sabnzbd') {
+        // Filter for NZB results only
+        const filtered = results.filter(result => ProwlarrService.isNZBResult(result));
+        console.log(`[Prowlarr] Filtered ${results.length} results to ${filtered.length} NZB results for SABnzbd`);
+        return filtered;
+      } else {
+        // Filter for torrent results only (default)
+        const filtered = results.filter(result => !ProwlarrService.isNZBResult(result));
+        console.log(`[Prowlarr] Filtered ${results.length} results to ${filtered.length} torrent results for qBittorrent`);
+        return filtered;
+      }
+    } catch (error) {
+      console.error('[Prowlarr] Failed to filter by protocol, returning all results:', error);
+      return results; // Fallback: return unfiltered if config fails
+    }
+  }
+
+  /**
+   * Detect if a result is an NZB download (Usenet) or torrent (BitTorrent)
+   * Static method for protocol detection
+   */
+  static isNZBResult(result: TorrentResult): boolean {
+    const url = result.downloadUrl.toLowerCase();
+
+    // Check file extension
+    if (url.endsWith('.nzb')) {
+      return true;
+    }
+
+    // Check URL path
+    if (url.includes('/nzb/') || url.includes('&t=get')) {
+      return true;
+    }
+
+    // Check categories (3030 is audiobooks, but some indexers use Usenet-specific codes)
+    // Note: This is less reliable, so we prioritize URL patterns
+
+    return false;
   }
 
   /**
