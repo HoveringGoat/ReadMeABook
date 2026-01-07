@@ -96,3 +96,32 @@ export async function searchABSItems(libraryId: string, query: string) {
 export async function triggerABSScan(libraryId: string) {
   await absRequest(`/libraries/${libraryId}/scan`, { method: 'POST' });
 }
+
+/**
+ * Trigger metadata match for a specific library item
+ * This tells Audiobookshelf to automatically match and populate metadata from providers
+ *
+ * @param itemId - The Audiobookshelf item ID
+ * @param asin - Optional ASIN for direct Audible matching (100% accurate when provided)
+ */
+export async function triggerABSItemMatch(itemId: string, asin?: string) {
+  try {
+    const body: any = {
+      provider: 'audible', // Use Audible as the metadata provider
+    };
+
+    // If we have an ASIN, we can do a direct match with 100% confidence
+    if (asin) {
+      body.asin = asin;
+      body.overrideDefaults = true; // Override defaults since we have exact ASIN match
+    }
+
+    await absRequest(`/items/${itemId}/match`, {
+      method: 'POST',
+      body,
+    });
+  } catch (error) {
+    // Don't throw - matching is best-effort, scan should continue even if match fails
+    console.error(`[ABS] Failed to trigger match for item ${itemId}:`, error instanceof Error ? error.message : error);
+  }
+}

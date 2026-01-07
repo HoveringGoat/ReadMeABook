@@ -350,14 +350,37 @@ export class RankingAlgorithm {
         const beforeWords = extractWords(beforeTitle, stopWords);
 
         // Title is complete if:
-        // 1. No significant words before it (not "This Inevitable Ruin" + "Dungeon Crawler Carl")
+        // 1. Acceptable prefix (no words, OR structured metadata like "Author - Series - ")
         // 2. Followed by clear metadata markers (not "'s Secret" or " Is Watching")
         const metadataMarkers = [' by ', ' - ', ' [', ' (', ' {', ' :', ','];
-        const hasNoWordsPrefix = beforeWords.length === 0;
         const hasMetadataSuffix = afterTitle === '' ||
                                   metadataMarkers.some(marker => afterTitle.startsWith(marker));
 
-        const isCompleteTitle = hasNoWordsPrefix && hasMetadataSuffix;
+        // Check prefix validity:
+        // - No words before = clean match
+        // - Title preceded by separator (` - `, `: `) = structured metadata (Author - Series - Title)
+        // - Author name in prefix = author attribution before title
+        const hasNoWordsPrefix = beforeWords.length === 0;
+
+        // Check if title is immediately preceded by a metadata separator
+        // This handles "Author - Series - 01 - Title" patterns
+        const precedingText = beforeTitle.trimEnd();
+        const titlePrecededBySeparator =
+          precedingText.endsWith('-') ||
+          precedingText.endsWith(':') ||
+          precedingText.endsWith('—');
+
+        // Check if author name appears in the prefix
+        // This handles "Author Name - Title" patterns
+        const authorInPrefix = requestAuthor.length > 2 &&
+          beforeTitle.includes(requestAuthor);
+
+        const hasAcceptablePrefix =
+          hasNoWordsPrefix ||
+          titlePrecededBySeparator ||
+          authorInPrefix;
+
+        const isCompleteTitle = hasAcceptablePrefix && hasMetadataSuffix;
 
         if (isCompleteTitle) {
           // Complete title match → full points

@@ -82,12 +82,13 @@ export async function processRetryFailedImports(payload: RetryFailedImportsPaylo
 
         let downloadPath: string;
 
-        // Try to get download path from qBittorrent if we have the torrent
-        if (downloadHistory.downloadClientId) {
+        // Try to get download path from the appropriate download client
+        if (downloadHistory.torrentHash) {
+          // qBittorrent download
           try {
             const { getQBittorrentService } = await import('../integrations/qbittorrent.service');
             const qbt = await getQBittorrentService();
-            const torrent = await qbt.getTorrent(downloadHistory.downloadClientId);
+            const torrent = await qbt.getTorrent(downloadHistory.torrentHash);
             const qbPath = `${torrent.save_path}/${torrent.name}`;
             downloadPath = PathMapper.transform(qbPath, mappingConfig);
             await logger?.info(
@@ -119,10 +120,51 @@ export async function processRetryFailedImports(payload: RetryFailedImportsPaylo
               (downloadPath !== fallbackPath ? ` → ${downloadPath} (mapped)` : '')
             );
           }
+        } else if (downloadHistory.nzbId) {
+          // SABnzbd download
+          try {
+            const { getSABnzbdService } = await import('../integrations/sabnzbd.service');
+            const sabnzbd = await getSABnzbdService();
+            const nzbInfo = await sabnzbd.getNZB(downloadHistory.nzbId);
+            if (nzbInfo && nzbInfo.downloadPath) {
+              downloadPath = PathMapper.transform(nzbInfo.downloadPath, mappingConfig);
+              await logger?.info(
+                `Got download path from SABnzbd for request ${request.id}: ${nzbInfo.downloadPath}` +
+                (downloadPath !== nzbInfo.downloadPath ? ` → ${downloadPath} (mapped)` : '')
+              );
+            } else {
+              await logger?.warn(`NZB ${downloadHistory.nzbId} not found or has no download path for request ${request.id}, falling back to configured path`);
+
+              if (!downloadHistory.torrentName) {
+                await logger?.warn(`No name stored for request ${request.id}, cannot construct fallback path, skipping`);
+                skipped++;
+                continue;
+              }
+
+              const downloadDir = await configService.get('download_dir');
+
+              if (!downloadDir) {
+                await logger?.error(`download_dir not configured, cannot retry request ${request.id}, skipping`);
+                skipped++;
+                continue;
+              }
+
+              const fallbackPath = `${downloadDir}/${downloadHistory.torrentName}`;
+              downloadPath = PathMapper.transform(fallbackPath, mappingConfig);
+              await logger?.info(
+                `Using fallback download path for request ${request.id}: ${fallbackPath}` +
+                (downloadPath !== fallbackPath ? ` → ${downloadPath} (mapped)` : '')
+              );
+            }
+          } catch (sabnzbdError) {
+            await logger?.warn(`SABnzbd error for request ${request.id}: ${sabnzbdError instanceof Error ? sabnzbdError.message : 'Unknown error'}, skipping`);
+            skipped++;
+            continue;
+          }
         } else {
           // No download client ID - use fallback path
           if (!downloadHistory.torrentName) {
-            await logger?.warn(`No download client ID or torrent name for request ${request.id}, skipping`);
+            await logger?.warn(`No download client ID or name for request ${request.id}, skipping`);
             skipped++;
             continue;
           }

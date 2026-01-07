@@ -24,6 +24,8 @@ export async function POST(request: NextRequest) {
           localPath,
         } = await request.json();
 
+        console.log('[TestDownloadClient] Received request:', { type, url, hasUsername: !!username, hasPassword: !!password });
+
         if (!type || !url) {
           return NextResponse.json(
             { success: false, error: 'Type and URL are required' },
@@ -59,6 +61,7 @@ export async function POST(request: NextRequest) {
         let version: string | undefined;
 
         if (type === 'qbittorrent') {
+          console.log('[TestDownloadClient] Testing qBittorrent connection');
           if (!username || !actualPassword) {
             return NextResponse.json(
               { success: false, error: 'Username and password are required for qBittorrent' },
@@ -74,6 +77,7 @@ export async function POST(request: NextRequest) {
             disableSSLVerify || false
           );
         } else if (type === 'sabnzbd') {
+          console.log('[TestDownloadClient] Testing SABnzbd connection');
           if (!actualPassword) {
             return NextResponse.json(
               { success: false, error: 'API key (password) is required for SABnzbd' },

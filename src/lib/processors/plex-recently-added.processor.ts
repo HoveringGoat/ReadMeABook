@@ -181,6 +181,16 @@ export async function processPlexRecentlyAddedCheck(payload: PlexRecentlyAddedPa
             });
 
             matchedDownloads++;
+
+            // Trigger metadata match for Audiobookshelf items (only for our downloaded requests)
+            if (backendMode === 'audiobookshelf') {
+              const itemId = match.plexGuid; // plexGuid contains the Audiobookshelf item ID
+              const asin = audiobook.audibleAsin || undefined;
+              const matchInfo = asin ? ` with ASIN ${asin}` : '';
+              await logger?.info(`Triggering metadata match for matched item: ${itemId}${matchInfo}`);
+              const { triggerABSItemMatch } = await import('../services/audiobookshelf/api');
+              await triggerABSItemMatch(itemId, asin);
+            }
           }
         } catch (error) {
           await logger?.error(`Failed to match request ${request.id}: ${error instanceof Error ? error.message : 'Unknown error'}`);

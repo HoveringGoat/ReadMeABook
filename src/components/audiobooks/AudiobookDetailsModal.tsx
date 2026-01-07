@@ -364,6 +364,7 @@ export function AudiobookDetailsModal({
                   'searching',
                   'downloading',
                   'processing',
+                  'downloaded',
                   'awaiting_import',
                 ];
                 if (
@@ -371,10 +372,15 @@ export function AudiobookDetailsModal({
                   requestStatus &&
                   inProgressStatuses.includes(requestStatus)
                 ) {
-                  // Show who requested it
-                  const buttonText = requestedByUsername
-                    ? `Requested by ${requestedByUsername}`
-                    : 'Already Requested';
+                  // Special text for 'downloaded' status (waiting for Plex scan)
+                  let buttonText;
+                  if (requestStatus === 'downloaded') {
+                    buttonText = 'Processing...';
+                  } else {
+                    buttonText = requestedByUsername
+                      ? `Requested by ${requestedByUsername}`
+                      : 'Already Requested';
+                  }
 
                   return (
                     <div className="flex-1">

@@ -102,6 +102,9 @@ export function RecentRequestsTable({ requests }: RecentRequestsTableProps) {
       await mutate('/api/admin/requests/recent');
       await mutate('/api/admin/metrics');
 
+      // Invalidate audiobook caches to update request status on home/search pages
+      await mutate((key) => typeof key === 'string' && key.includes('/api/audiobooks'));
+
       // Close dialog
       setShowDeleteConfirm(false);
       setSelectedRequest(null);

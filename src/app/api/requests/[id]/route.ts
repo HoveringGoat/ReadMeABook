@@ -194,11 +194,39 @@ export async function PATCH(
 
           const downloadHistory = requestWithData.downloadHistory[0];
 
-          // Get download path from qBittorrent
-          const { getQBittorrentService } = await import('@/lib/integrations/qbittorrent.service');
-          const qbt = await getQBittorrentService();
-          const torrent = await qbt.getTorrent(downloadHistory.downloadClientId!);
-          const downloadPath = `${torrent.save_path}/${torrent.name}`;
+          // Get download path from the appropriate download client
+          let downloadPath: string;
+
+          if (downloadHistory.torrentHash) {
+            // qBittorrent - get path from torrent info
+            const { getQBittorrentService } = await import('@/lib/integrations/qbittorrent.service');
+            const qbt = await getQBittorrentService();
+            const torrent = await qbt.getTorrent(downloadHistory.torrentHash);
+            downloadPath = `${torrent.save_path}/${torrent.name}`;
+          } else if (downloadHistory.nzbId) {
+            // SABnzbd - get path from NZB info
+            const { getSABnzbdService } = await import('@/lib/integrations/sabnzbd.service');
+            const sabnzbd = await getSABnzbdService();
+            const nzbInfo = await sabnzbd.getNZB(downloadHistory.nzbId);
+            if (!nzbInfo || !nzbInfo.downloadPath) {
+              return NextResponse.json(
+                {
+                  error: 'ValidationError',
+                  message: 'Download path not available from SABnzbd',
+                },
+                { status: 400 }
+              );
+            }
+            downloadPath = nzbInfo.downloadPath;
+          } else {
+            return NextResponse.json(
+              {
+                error: 'ValidationError',
+                message: 'No download client ID found in history',
+              },
+              { status: 400 }
+            );
+          }
 
           await jobQueue.addOrganizeJob(
             id,

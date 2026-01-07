@@ -85,7 +85,7 @@ export async function deleteRequest(
     // 2. Handle downloads & seeding
     const downloadHistory = request.downloadHistory[0];
 
-    if (downloadHistory && downloadHistory.downloadClientId && downloadHistory.indexerName) {
+    if (downloadHistory && downloadHistory.indexerName) {
       try {
         // Get indexer seeding configuration
         const { getConfigService } = await import('./config.service');
@@ -100,67 +100,84 @@ export async function deleteRequest(
           );
         }
 
-        // Get torrent from qBittorrent
-        const { getQBittorrentService } = await import('../integrations/qbittorrent.service');
-        const qbt = await getQBittorrentService();
+        // Handle based on download client type (check which ID is present)
+        if (downloadHistory.torrentHash) {
+          // qBittorrent download
+          const { getQBittorrentService } = await import('../integrations/qbittorrent.service');
+          const qbt = await getQBittorrentService();
 
-        let torrent;
-        try {
-          torrent = await qbt.getTorrent(downloadHistory.downloadClientId);
-        } catch (error) {
-          // Torrent not found in qBittorrent (already removed)
-          console.log(`[RequestDelete] Torrent ${downloadHistory.downloadClientId} not found in qBittorrent, skipping`);
-        }
+          let torrent;
+          try {
+            torrent = await qbt.getTorrent(downloadHistory.torrentHash);
+          } catch (error) {
+            // Torrent not found in qBittorrent (already removed)
+            console.log(`[RequestDelete] Torrent ${downloadHistory.torrentHash} not found in qBittorrent, skipping`);
+          }
 
-        if (torrent) {
-          // Torrent exists in qBittorrent
-          const isUnlimitedSeeding = !seedingConfig || seedingConfig.seedingTimeMinutes === 0;
-          const isCompleted = downloadHistory.downloadStatus === 'completed';
+          if (torrent) {
+            // Torrent exists in qBittorrent
+            const isUnlimitedSeeding = !seedingConfig || seedingConfig.seedingTimeMinutes === 0;
+            const isCompleted = downloadHistory.downloadStatus === 'completed';
 
-          if (isUnlimitedSeeding) {
-            // Unlimited seeding - keep in qBittorrent, stop monitoring
-            console.log(
-              `[RequestDelete] Keeping torrent ${torrent.name} for unlimited seeding (indexer: ${downloadHistory.indexerName})`
-            );
-            torrentsKeptUnlimited++;
-          } else if (!isCompleted) {
-            // Download not completed - delete immediately
-            console.log(
-              `[RequestDelete] Deleting incomplete download: ${torrent.name}`
-            );
-            await qbt.deleteTorrent(downloadHistory.downloadClientId, true);
-            torrentsRemoved++;
-          } else {
-            // Check if seeding requirement is met
-            const seedingTimeSeconds = seedingConfig.seedingTimeMinutes * 60;
-            const actualSeedingTime = torrent.seeding_time || 0;
-            const hasMetRequirement = actualSeedingTime >= seedingTimeSeconds;
-
-            if (hasMetRequirement) {
-              // Seeding requirement met - delete now
+            if (isUnlimitedSeeding) {
+              // Unlimited seeding - keep in qBittorrent, stop monitoring
               console.log(
-                `[RequestDelete] Deleting torrent ${torrent.name} (seeding complete: ${Math.floor(
-                  actualSeedingTime / 60
-                )}/${seedingConfig.seedingTimeMinutes} minutes)`
+                `[RequestDelete] Keeping torrent ${torrent.name} for unlimited seeding (indexer: ${downloadHistory.indexerName})`
               );
-              await qbt.deleteTorrent(downloadHistory.downloadClientId, true);
+              torrentsKeptUnlimited++;
+            } else if (!isCompleted) {
+              // Download not completed - delete immediately
+              console.log(
+                `[RequestDelete] Deleting incomplete download: ${torrent.name}`
+              );
+              await qbt.deleteTorrent(downloadHistory.torrentHash, true);
               torrentsRemoved++;
             } else {
-              // Still needs seeding - keep for cleanup job
-              const remainingMinutes = Math.ceil((seedingTimeSeconds - actualSeedingTime) / 60);
-              console.log(
-                `[RequestDelete] Keeping torrent ${torrent.name} for ${remainingMinutes} more minutes of seeding`
-              );
-              torrentsKeptSeeding++;
+              // Check if seeding requirement is met
+              const seedingTimeSeconds = seedingConfig.seedingTimeMinutes * 60;
+              const actualSeedingTime = torrent.seeding_time || 0;
+              const hasMetRequirement = actualSeedingTime >= seedingTimeSeconds;
+
+              if (hasMetRequirement) {
+                // Seeding requirement met - delete now
+                console.log(
+                  `[RequestDelete] Deleting torrent ${torrent.name} (seeding complete: ${Math.floor(
+                    actualSeedingTime / 60
+                  )}/${seedingConfig.seedingTimeMinutes} minutes)`
+                );
+                await qbt.deleteTorrent(downloadHistory.torrentHash, true);
+                torrentsRemoved++;
+              } else {
+                // Still needs seeding - keep for cleanup job
+                const remainingMinutes = Math.ceil((seedingTimeSeconds - actualSeedingTime) / 60);
+                console.log(
+                  `[RequestDelete] Keeping torrent ${torrent.name} for ${remainingMinutes} more minutes of seeding`
+                );
+                torrentsKeptSeeding++;
+              }
             }
+          }
+        } else if (downloadHistory.nzbId) {
+          // SABnzbd download - no seeding concept for Usenet
+          try {
+            const { getSABnzbdService } = await import('../integrations/sabnzbd.service');
+            const sabnzbd = await getSABnzbdService();
+
+            // Try to delete the NZB from SABnzbd (might already be completed/removed)
+            await sabnzbd.deleteNZB(downloadHistory.nzbId, true);
+            console.log(`[RequestDelete] Deleted NZB ${downloadHistory.nzbId} from SABnzbd`);
+            torrentsRemoved++;
+          } catch (error) {
+            // NZB not found or already removed
+            console.log(`[RequestDelete] NZB ${downloadHistory.nzbId} not found in SABnzbd, skipping`);
           }
         }
       } catch (error) {
         console.error(
-          `[RequestDelete] Error handling torrent for request ${requestId}:`,
+          `[RequestDelete] Error handling download for request ${requestId}:`,
           error instanceof Error ? error.message : 'Unknown error'
         );
-        // Continue with deletion even if torrent handling fails
+        // Continue with deletion even if download handling fails
       }
     }
 

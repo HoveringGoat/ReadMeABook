@@ -105,6 +105,13 @@ export function useCreateRequest() {
       const data = await response.json();
 
       if (!response.ok) {
+        // Handle specific error types with custom messages
+        if (data.error === 'BeingProcessed') {
+          throw new Error('This audiobook is being processed. It will be available in your library soon.');
+        }
+        if (data.error === 'AlreadyAvailable') {
+          throw new Error('This audiobook is already in your Plex library.');
+        }
         throw new Error(data.message || 'Failed to create request');
       }
 
@@ -362,6 +369,13 @@ export function useRequestWithTorrent() {
       const data = await response.json();
 
       if (!response.ok) {
+        // Handle specific error types with custom messages
+        if (data.error === 'BeingProcessed') {
+          throw new Error('This audiobook is being processed. It will be available in your library soon.');
+        }
+        if (data.error === 'AlreadyAvailable') {
+          throw new Error('This audiobook is already in your Plex library.');
+        }
         throw new Error(data.message || 'Failed to create request and download torrent');
       }
 

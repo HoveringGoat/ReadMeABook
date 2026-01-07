@@ -41,7 +41,40 @@ export async function POST(request: NextRequest) {
       const body = await req.json();
       const { audiobook } = CreateRequestSchema.parse(body);
 
-      // Check if audiobook is already available in Plex library
+      // First check: Is there an existing request in 'downloaded' or 'available' status?
+      // This catches the gap where files are organized but Plex hasn't scanned yet
+      const existingActiveRequest = await prisma.request.findFirst({
+        where: {
+          audiobook: {
+            audibleAsin: audiobook.asin,
+          },
+          status: { in: ['downloaded', 'available'] },
+          deletedAt: null,
+        },
+        include: {
+          user: { select: { plexUsername: true } },
+        },
+      });
+
+      if (existingActiveRequest) {
+        const status = existingActiveRequest.status;
+        const isOwnRequest = existingActiveRequest.userId === req.user.id;
+
+        return NextResponse.json(
+          {
+            error: status === 'available' ? 'AlreadyAvailable' : 'BeingProcessed',
+            message: status === 'available'
+              ? 'This audiobook is already available in your Plex library'
+              : 'This audiobook is being processed and will be available soon',
+            requestStatus: status,
+            isOwnRequest,
+            requestedBy: existingActiveRequest.user?.plexUsername,
+          },
+          { status: 409 }
+        );
+      }
+
+      // Second check: Is audiobook already in Plex library? (fallback for non-requested books)
       const plexMatch = await findPlexMatch({
         asin: audiobook.asin,
         title: audiobook.title,

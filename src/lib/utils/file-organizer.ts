@@ -9,6 +9,7 @@ import axios from 'axios';
 import { createJobLogger, JobLogger } from './job-logger';
 import { tagMultipleFiles, checkFfmpegAvailable } from './metadata-tagger';
 import { prisma } from '../db';
+import { downloadEbook } from '../services/ebook-scraper';
 
 export interface AudiobookMetadata {
   title: string;
@@ -259,6 +260,56 @@ export class FileOrganizer {
           await logger?.warn(`Failed to download cover art: ${error instanceof Error ? error.message : 'Unknown error'}`);
           result.errors.push('Failed to download cover art');
         }
+      }
+
+      // E-book sidecar: Download accompanying e-book if enabled
+      try {
+        const ebookConfig = await prisma.configuration.findUnique({
+          where: { key: 'ebook_sidecar_enabled' },
+        });
+
+        const ebookEnabled = ebookConfig?.value === 'true';
+
+        if (ebookEnabled) {
+          await logger?.info(`E-book sidecar enabled, searching for e-book...`);
+
+          // Get configuration
+          const [formatConfig, baseUrlConfig, flaresolverrConfig] = await Promise.all([
+            prisma.configuration.findUnique({ where: { key: 'ebook_sidecar_preferred_format' } }),
+            prisma.configuration.findUnique({ where: { key: 'ebook_sidecar_base_url' } }),
+            prisma.configuration.findUnique({ where: { key: 'ebook_sidecar_flaresolverr_url' } }),
+          ]);
+
+          const preferredFormat = formatConfig?.value || 'epub';
+          const baseUrl = baseUrlConfig?.value || 'https://annas-archive.li';
+          const flaresolverrUrl = flaresolverrConfig?.value || undefined;
+
+          // Download e-book (will try ASIN first, then fall back to title+author)
+          const ebookResult = await downloadEbook(
+            audiobook.asin || '', // ASIN (optional - will fallback to title+author if empty)
+            audiobook.title,
+            audiobook.author,
+            targetPath, // Same directory as audiobook
+            preferredFormat,
+            baseUrl,
+            logger ?? undefined,
+            flaresolverrUrl
+          );
+
+          if (ebookResult.success && ebookResult.filePath) {
+            await logger?.info(`E-book downloaded: ${path.basename(ebookResult.filePath)}`);
+            result.filesMovedCount++;
+          } else {
+            await logger?.warn(`E-book download failed: ${ebookResult.error}`);
+            result.errors.push(`E-book sidecar: ${ebookResult.error}`);
+          }
+        }
+      } catch (error) {
+        await logger?.warn(
+          `E-book sidecar error: ${error instanceof Error ? error.message : 'Unknown error'}`
+        );
+        result.errors.push('E-book sidecar failed');
+        // Don't throw - audiobook organization continues
       }
 
       result.targetPath = targetPath;

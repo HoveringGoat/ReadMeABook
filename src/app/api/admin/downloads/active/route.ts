@@ -7,6 +7,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { prisma } from '@/lib/db';
 import { getQBittorrentService } from '@/lib/integrations/qbittorrent.service';
+import { getSABnzbdService } from '@/lib/integrations/sabnzbd.service';
+import { getConfigService } from '@/lib/services/config.service';
 
 export async function GET(request: NextRequest) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
@@ -48,6 +50,7 @@ export async function GET(request: NextRequest) {
             downloadStatus: true,
             torrentName: true,
             torrentHash: true,
+            nzbId: true,
             startedAt: true,
             createdAt: true,
           },
@@ -59,48 +62,41 @@ export async function GET(request: NextRequest) {
       take: 20,
     });
 
-    // Get qBittorrent service
-    let qbService;
-    try {
-      qbService = await getQBittorrentService();
-    } catch (error) {
-      console.error('[Admin] Failed to initialize qBittorrent service:', error);
-      // Return downloads without speed/eta if qBittorrent is unavailable
-      const formatted = activeDownloads.map((download) => ({
-        requestId: download.id,
-        title: download.audiobook.title,
-        author: download.audiobook.author,
-        status: download.status,
-        progress: download.progress,
-        speed: 0,
-        eta: null,
-        torrentName: download.downloadHistory[0]?.torrentName || null,
-        downloadStatus: download.downloadHistory[0]?.downloadStatus || null,
-        user: download.user.plexUsername,
-        startedAt: download.downloadHistory[0]?.startedAt || download.downloadHistory[0]?.createdAt || download.updatedAt,
-      }));
-      return NextResponse.json({ downloads: formatted });
-    }
+    // Get configured download client type
+    const configService = getConfigService();
+    const clientType = (await configService.get('download_client_type')) || 'qbittorrent';
 
-    // Format response with speed and ETA from qBittorrent
+    // Format response with speed and ETA from download client
     const formatted = await Promise.all(
       activeDownloads.map(async (download) => {
         let speed = 0;
         let eta: number | null = null;
 
-        // Get torrent hash from download history
-        const torrentHash = download.downloadHistory[0]?.torrentHash;
-
-        // Fetch torrent info from qBittorrent if we have a hash
-        if (torrentHash) {
-          try {
-            const torrentInfo = await qbService.getTorrent(torrentHash);
-            speed = torrentInfo.dlspeed;
-            eta = torrentInfo.eta > 0 ? torrentInfo.eta : null;
-          } catch (error) {
-            // Torrent not found or other error - use defaults
-            console.error(`[Admin] Failed to get torrent info for ${torrentHash}:`, error);
+        try {
+          if (clientType === 'qbittorrent') {
+            // Get torrent hash from download history
+            const torrentHash = download.downloadHistory[0]?.torrentHash;
+            if (torrentHash) {
+              const qbService = await getQBittorrentService();
+              const torrentInfo = await qbService.getTorrent(torrentHash);
+              speed = torrentInfo.dlspeed;
+              eta = torrentInfo.eta > 0 ? torrentInfo.eta : null;
+            }
+          } else if (clientType === 'sabnzbd') {
+            // Get NZB ID from download history
+            const nzbId = download.downloadHistory[0]?.nzbId;
+            if (nzbId) {
+              const sabnzbdService = await getSABnzbdService();
+              const nzbInfo = await sabnzbdService.getNZB(nzbId);
+              if (nzbInfo) {
+                speed = nzbInfo.downloadSpeed;
+                eta = nzbInfo.timeLeft > 0 ? nzbInfo.timeLeft : null;
+              }
+            }
           }
+        } catch (error) {
+          // Download client unavailable or download not found - use defaults
+          console.error(`[Admin] Failed to get download info:`, error);
         }
 
         return {

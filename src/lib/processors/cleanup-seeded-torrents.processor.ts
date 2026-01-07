@@ -82,7 +82,22 @@ export async function processCleanupSeededTorrents(payload: CleanupSeededTorrent
       try {
         const downloadHistory = request.downloadHistory[0];
 
-        if (!downloadHistory || !downloadHistory.downloadClientId || !downloadHistory.indexerName) {
+        if (!downloadHistory || !downloadHistory.indexerName) {
+          continue;
+        }
+
+        // Skip SABnzbd downloads - Usenet doesn't have seeding concept
+        if (downloadHistory.nzbId && !downloadHistory.torrentHash) {
+          // For soft-deleted SABnzbd requests, hard delete immediately (no seeding needed)
+          if (request.deletedAt) {
+            await prisma.request.delete({ where: { id: request.id } });
+            await logger?.info(`Hard-deleted orphaned SABnzbd request ${request.id}`);
+          }
+          continue;
+        }
+
+        // Only process torrent downloads
+        if (!downloadHistory.torrentHash) {
           continue;
         }
 
@@ -111,7 +126,7 @@ export async function processCleanupSeededTorrents(payload: CleanupSeededTorrent
 
         let torrent;
         try {
-          torrent = await qbt.getTorrent(downloadHistory.downloadClientId);
+          torrent = await qbt.getTorrent(downloadHistory.torrentHash);
         } catch (error) {
           // Torrent might already be deleted, skip
           continue;
@@ -130,7 +145,7 @@ export async function processCleanupSeededTorrents(payload: CleanupSeededTorrent
         await logger?.info(`Torrent ${torrent.name} (${indexerName}) has met seeding requirement (${Math.floor(actualSeedingTime / 60)}/${seedingConfig.seedingTimeMinutes} minutes)`);
 
         // Delete torrent and files from qBittorrent
-        await qbt.deleteTorrent(downloadHistory.downloadClientId, true); // true = delete files
+        await qbt.deleteTorrent(downloadHistory.torrentHash, true); // true = delete files
 
         // If this is a soft-deleted request (orphaned download), hard delete it now
         if (request.deletedAt) {

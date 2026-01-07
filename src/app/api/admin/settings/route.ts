@@ -82,6 +82,12 @@ export async function GET(request: NextRequest) {
         mediaDir: configMap.get('media_dir') || '/media/audiobooks',
         metadataTaggingEnabled: configMap.get('metadata_tagging_enabled') === 'true',
       },
+      ebook: {
+        enabled: configMap.get('ebook_sidecar_enabled') === 'true',
+        preferredFormat: configMap.get('ebook_sidecar_preferred_format') || 'epub',
+        baseUrl: configMap.get('ebook_sidecar_base_url') || 'https://annas-archive.li',
+        flaresolverrUrl: configMap.get('ebook_sidecar_flaresolverr_url') || '',
+      },
       general: {
         appName: configMap.get('app_name') || 'ReadMeABook',
         allowRegistrations: configMap.get('allow_registrations') === 'true',

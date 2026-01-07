@@ -36,6 +36,11 @@
 - **Database caching, real-time matching** → [integrations/audible.md](integrations/audible.md)
 - **Book covers API for login page** → [frontend/pages/login.md](frontend/pages/login.md)
 
+## E-book Sidecar
+- **Optional e-book downloads from Anna's Archive** → [integrations/ebook-sidecar.md](integrations/ebook-sidecar.md)
+- **ASIN-based matching, format selection** → [integrations/ebook-sidecar.md](integrations/ebook-sidecar.md)
+- **Non-blocking, atomic failures** → [integrations/ebook-sidecar.md](integrations/ebook-sidecar.md)
+
 ## Automation Pipeline
 - **Full pipeline overview** → [phase3/README.md](phase3/README.md)
 - **Search via Prowlarr (torrents + NZBs)** → [phase3/prowlarr.md](phase3/prowlarr.md)
@@ -76,6 +81,8 @@
 **"How do torrent downloads work?"** → [phase3/qbittorrent.md](phase3/qbittorrent.md), [backend/services/jobs.md](backend/services/jobs.md)
 **"How do Usenet/NZB downloads work?"** → [phase3/sabnzbd.md](phase3/sabnzbd.md), [backend/services/jobs.md](backend/services/jobs.md)
 **"How does Plex matching work?"** → [integrations/plex.md](integrations/plex.md)
+**"How does e-book sidecar work?"** → [integrations/ebook-sidecar.md](integrations/ebook-sidecar.md)
+**"How do I enable e-book downloads?"** → [integrations/ebook-sidecar.md](integrations/ebook-sidecar.md), [settings-pages.md](settings-pages.md)
 **"How do scheduled jobs work?"** → [backend/services/scheduler.md](backend/services/scheduler.md)
 **"How do I configure external services?"** → [setup-wizard.md](setup-wizard.md), [settings-pages.md](settings-pages.md)
 **"What's the database schema?"** → [backend/database.md](backend/database.md)

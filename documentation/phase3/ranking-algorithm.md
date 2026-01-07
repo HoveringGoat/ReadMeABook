@@ -30,11 +30,16 @@ Evaluates and scores torrents to automatically select best audiobook download.
   - Example: "We Are Legion (We Are Bob)" tries both full title and "We Are Legion"
   - Handles torrents that include subtitle AND those that omit it
 - Complete title match requirements (both must be true):
-  - No significant words BEFORE matched title (prevents "This Inevitable Ruin Dungeon Crawler Carl, Book 7")
-  - Followed by metadata markers: " by", " [", " -", " (", " {", " :", ","
+  - **Acceptable prefix** (any of these):
+    - No significant words before title (clean match)
+    - Title preceded by metadata separator (` - `, `: `, `—`) — handles "Author - Series - 01 - Title"
+    - Author name appears in prefix — handles "Author Name - Title"
+  - **Acceptable suffix**: Followed by metadata markers: " by", " [", " -", " (", " {", " :", "," or end of string
 - Complete match → 35 pts
-- Title has prefix/suffix words OR continues with more words → fuzzy similarity (partial credit)
-- Prevents series confusion: "The Housemaid" vs "The Housemaid's Secret", "Dungeon Crawler Carl" vs "Book 7"
+- Unstructured prefix (words without separators) → fuzzy similarity (partial credit)
+  - Prevents: "This Inevitable Ruin Dungeon Crawler Carl" matching "Dungeon Crawler Carl"
+- Suffix continues with non-metadata → fuzzy similarity (partial credit)
+  - Prevents: "The Housemaid's Secret" matching "The Housemaid"
 - No substring match → fuzzy similarity (best score from full or required title)
 
 **Stage 3: Author Matching (0-15 pts)**

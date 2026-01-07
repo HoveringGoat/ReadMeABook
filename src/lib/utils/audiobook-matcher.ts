@@ -22,6 +22,7 @@ export interface AudiobookMatchInput {
 
 export interface AudiobookMatchResult {
   plexGuid: string;
+  plexRatingKey: string | null;
   title: string;
   author: string;
 }
@@ -82,6 +83,7 @@ export async function findPlexMatch(
     },
     select: {
       plexGuid: true,
+      plexRatingKey: true,
       title: true,
       author: true,
       asin: true,    // Include ASIN field for direct matching
@@ -297,6 +299,9 @@ export async function enrichAudiobooksWithMatches(
       id: true,
       audibleAsin: true,
       requests: {
+        where: {
+          deletedAt: null, // Only include active (non-deleted) requests
+        },
         select: {
           id: true,
           status: true,
