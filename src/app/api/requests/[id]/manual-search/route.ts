@@ -70,6 +70,7 @@ export async function POST(
         id: requestRecord.audiobook.id,
         title: requestRecord.audiobook.title,
         author: requestRecord.audiobook.author,
+        asin: requestRecord.audiobook.audibleAsin || undefined,
       });
 
       // Update request status

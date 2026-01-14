@@ -77,8 +77,9 @@ export function InteractiveTorrentSearchModal({
         const customTitle = searchTitle !== audiobook.title ? searchTitle : undefined;
         data = await searchByRequestId(requestId, customTitle);
       } else {
-        // New flow: search by custom title + original author
-        data = await searchByAudiobook(searchTitle, audiobook.author);
+        // New flow: search by custom title + original author + optional ASIN for size scoring
+        const asin = fullAudiobook?.asin;
+        data = await searchByAudiobook(searchTitle, audiobook.author, asin);
       }
       setResults(data || []);
     } catch (err) {

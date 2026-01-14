@@ -176,6 +176,7 @@ export async function POST(request: NextRequest) {
           id: audiobookRecord.id,
           title: audiobookRecord.title,
           author: audiobookRecord.author,
+          asin: audiobookRecord.audibleAsin || undefined,
         });
       }
 

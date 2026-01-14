@@ -308,7 +308,7 @@ export function useSearchTorrents() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const searchTorrents = async (title: string, author: string) => {
+  const searchTorrents = async (title: string, author: string, asin?: string) => {
     if (!accessToken) {
       throw new Error('Not authenticated');
     }
@@ -322,7 +322,7 @@ export function useSearchTorrents() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ title, author }),
+        body: JSON.stringify({ title, author, asin }),
       });
 
       const data = await response.json();

@@ -17,6 +17,7 @@ interface SavedIndexerConfig {
   priority: number;
   seedingTimeMinutes: number;
   rssEnabled?: boolean;
+  categories?: number[]; // Array of category IDs (default: [3030] for audiobooks)
 }
 
 /**
@@ -48,16 +49,19 @@ export async function GET(request: NextRequest) {
 
         const indexersWithConfig = indexers.map((indexer: any) => {
           const saved = savedIndexersMap.get(indexer.id);
+          const isAdded = !!saved;
 
           return {
             id: indexer.id,
             name: indexer.name,
             protocol: indexer.protocol,
             privacy: indexer.privacy,
-            enabled: !!saved, // Enabled if in saved list
+            enabled: isAdded, // Enabled if in saved list
+            isAdded, // Explicit flag for UI (new card-based interface)
             priority: saved?.priority || 10,
             seedingTimeMinutes: saved?.seedingTimeMinutes ?? 0,
             rssEnabled: saved?.rssEnabled ?? false,
+            categories: saved?.categories || [3030], // Default to audiobooks category
             supportsRss: indexer.capabilities?.supportsRss !== false, // Default to true if not specified
           };
         });
@@ -101,6 +105,7 @@ export async function PUT(request: NextRequest) {
             priority: indexer.priority,
             seedingTimeMinutes: indexer.seedingTimeMinutes,
             rssEnabled: indexer.rssEnabled || false,
+            categories: indexer.categories || [3030], // Default to audiobooks if not specified
           }));
 
         // Save to configuration (matches wizard format)

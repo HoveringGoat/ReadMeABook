@@ -133,22 +133,22 @@ export async function processPlexRecentlyAddedCheck(payload: PlexRecentlyAddedPa
       }
     }
 
-    // Check for downloaded requests to match
-    const downloadedRequests = await prisma.request.findMany({
+    // Check for all non-terminal requests to match
+    const matchableRequests = await prisma.request.findMany({
       where: {
-        status: 'downloaded',
+        status: { notIn: ['available', 'cancelled'] },
         deletedAt: null,
       },
       include: { audiobook: true },
-      take: 50,
+      take: 100,
     });
 
-    if (downloadedRequests.length > 0) {
-      logger.info(`Checking ${downloadedRequests.length} downloaded requests for matches`);
+    if (matchableRequests.length > 0) {
+      logger.info(`Checking ${matchableRequests.length} matchable requests for matches (all non-terminal statuses)`);
 
       const { findPlexMatch } = await import('../utils/audiobook-matcher');
 
-      for (const request of downloadedRequests) {
+      for (const request of matchableRequests) {
         try {
           const audiobook = request.audiobook;
           const match = await findPlexMatch({
@@ -159,7 +159,11 @@ export async function processPlexRecentlyAddedCheck(payload: PlexRecentlyAddedPa
           });
 
           if (match) {
-            logger.info(`Match found: "${audiobook.title}" → "${match.title}"`);
+            const originalStatus = request.status;
+            logger.info(
+              `Match found: "${audiobook.title}" → "${match.title}"` +
+              (originalStatus !== 'downloaded' ? ` (was '${originalStatus}')` : '')
+            );
 
             // Update audiobook with matched library item ID
             const updateData: any = { updatedAt: new Date() };
@@ -177,7 +181,15 @@ export async function processPlexRecentlyAddedCheck(payload: PlexRecentlyAddedPa
 
             await prisma.request.update({
               where: { id: request.id },
-              data: { status: 'available', completedAt: new Date(), updatedAt: new Date() },
+              data: {
+                status: 'available',
+                completedAt: new Date(),
+                errorMessage: null,
+                searchAttempts: 0,
+                downloadAttempts: 0,
+                importAttempts: 0,
+                updatedAt: new Date(),
+              },
             });
 
             matchedDownloads++;
@@ -198,7 +210,7 @@ export async function processPlexRecentlyAddedCheck(payload: PlexRecentlyAddedPa
       }
     }
 
-    logger.info(`Complete: ${newCount} new, ${updatedCount} updated, ${matchedDownloads} matched downloads`);
+    logger.info(`Complete: ${newCount} new, ${updatedCount} updated, ${matchedDownloads} matched requests`);
 
     return {
       success: true,

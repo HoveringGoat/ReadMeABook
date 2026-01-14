@@ -7,6 +7,7 @@ import { SearchIndexersPayload, getJobQueueService } from '../services/job-queue
 import { prisma } from '../db';
 import { getProwlarrService } from '../integrations/prowlarr.service';
 import { getRankingAlgorithm } from '../utils/ranking-algorithm';
+import { groupIndexersByCategories, getGroupDescription } from '../utils/indexer-grouping';
 import { RMABLogger } from '../utils/logger';
 
 /**
@@ -41,9 +42,8 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
     }
 
     const indexersConfig = JSON.parse(indexersConfigStr);
-    const enabledIndexerIds = indexersConfig.map((indexer: any) => indexer.id);
 
-    if (enabledIndexerIds.length === 0) {
+    if (indexersConfig.length === 0) {
       throw new Error('No indexers enabled. Please enable at least one indexer in settings.');
     }
 
@@ -56,7 +56,16 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
     const flagConfigStr = await configService.get('indexer_flag_config');
     const flagConfigs = flagConfigStr ? JSON.parse(flagConfigStr) : [];
 
-    logger.info(`Searching ${enabledIndexerIds.length} enabled indexers`);
+    // Group indexers by their category configuration
+    // This minimizes API calls while ensuring each indexer only searches its configured categories
+    const groups = groupIndexersByCategories(indexersConfig);
+
+    logger.info(`Searching ${indexersConfig.length} enabled indexers in ${groups.length} group${groups.length > 1 ? 's' : ''}`);
+
+    // Log each group for transparency
+    groups.forEach((group, index) => {
+      logger.info(`Group ${index + 1}: ${getGroupDescription(group)}`);
+    });
 
     // Get Prowlarr service
     const prowlarr = await getProwlarrService();
@@ -66,15 +75,31 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
 
     logger.info(`Searching for: "${searchQuery}"`);
 
-    // Search indexers - ONLY enabled ones
-    const searchResults = await prowlarr.search(searchQuery, {
-      category: 3030, // Audiobooks
-      minSeeders: 1, // Only torrents with at least 1 seeder
-      maxResults: 100, // Increased limit for broader search
-      indexerIds: enabledIndexerIds, // Filter by enabled indexers
-    });
+    // Search Prowlarr for each group and combine results
+    const allResults = [];
 
-    logger.info(`Found ${searchResults.length} raw results`);
+    for (let i = 0; i < groups.length; i++) {
+      const group = groups[i];
+      logger.info(`Searching group ${i + 1}/${groups.length}: ${getGroupDescription(group)}`);
+
+      try {
+        const groupResults = await prowlarr.search(searchQuery, {
+          categories: group.categories,
+          indexerIds: group.indexerIds,
+          minSeeders: 1, // Only torrents with at least 1 seeder
+          maxResults: 100, // Limit per group
+        });
+
+        logger.info(`Group ${i + 1} returned ${groupResults.length} results`);
+        allResults.push(...groupResults);
+      } catch (error) {
+        logger.error(`Group ${i + 1} search failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        // Continue with other groups even if one fails
+      }
+    }
+
+    const searchResults = allResults;
+    logger.info(`Found ${searchResults.length} total results from ${groups.length} group${groups.length > 1 ? 's' : ''}`);
 
     if (searchResults.length === 0) {
       // No results found - queue for re-search instead of failing
@@ -97,14 +122,44 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
       };
     }
 
+    // Fetch runtime from Audnexus if ASIN available (for size-based scoring/filtering)
+    let durationMinutes: number | undefined;
+    if (audiobook.asin) {
+      const { getAudibleService } = await import('../integrations/audible.service');
+      const audibleService = getAudibleService();
+      const runtime = await audibleService.getRuntime(audiobook.asin);
+      if (runtime) {
+        durationMinutes = runtime;
+        logger.info(`Fetched runtime: ${runtime} minutes for ASIN ${audiobook.asin}`);
+      } else {
+        logger.debug(`No runtime found for ASIN ${audiobook.asin}`);
+      }
+    }
+
+    // Log filter info
+    const sizeMBThreshold = 20;
+    const preFilterCount = searchResults.length;
+    const belowThreshold = searchResults.filter(r => (r.size / (1024 * 1024)) < sizeMBThreshold);
+    if (belowThreshold.length > 0) {
+      logger.info(`Will filter ${belowThreshold.length} results < ${sizeMBThreshold} MB (likely ebooks)`);
+    }
+
     // Get ranking algorithm
     const ranker = getRankingAlgorithm();
 
     // Rank results with indexer priorities and flag configs
+    // Note: rankTorrents now filters out results < 20 MB internally
     const rankedResults = ranker.rankTorrents(searchResults, {
       title: audiobook.title,
       author: audiobook.author,
+      durationMinutes,
     }, indexerPriorities, flagConfigs);
+
+    // Log filter results
+    const postFilterCount = rankedResults.length;
+    if (postFilterCount < preFilterCount) {
+      logger.info(`Filtered out ${preFilterCount - postFilterCount} results < ${sizeMBThreshold} MB`);
+    }
 
     // Dual threshold filtering:
     // 1. Base score must be >= 50 (quality minimum)
@@ -155,12 +210,16 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
     logger.info(`--------------------------------------------------------`);
     for (let i = 0; i < top3.length; i++) {
       const result = top3[i];
+      const sizeMB = (result.size / (1024 * 1024)).toFixed(1);
+      const mbPerMin = durationMinutes ? ((result.size / (1024 * 1024)) / durationMinutes).toFixed(2) : 'N/A';
+
       logger.info(`${i + 1}. "${result.title}"`);
       logger.info(`   Indexer: ${result.indexer}${result.indexerId ? ` (ID: ${result.indexerId})` : ''}`);
       logger.info(``);
       logger.info(`   Base Score: ${result.score.toFixed(1)}/100`);
       logger.info(`   - Title/Author Match: ${result.breakdown.matchScore.toFixed(1)}/60`);
-      logger.info(`   - Format Quality: ${result.breakdown.formatScore.toFixed(1)}/25 (${result.format || 'unknown'})`);
+      logger.info(`   - Format Quality: ${result.breakdown.formatScore.toFixed(1)}/10 (${result.format || 'unknown'})`);
+      logger.info(`   - Size Quality: ${durationMinutes ? `${result.breakdown.sizeScore.toFixed(1)}/15 (${sizeMB} MB, ${mbPerMin} MB/min, ${durationMinutes} min runtime)` : 'N/A (no runtime data)'}`);
       logger.info(`   - Seeder Count: ${result.breakdown.seederScore.toFixed(1)}/15 (${result.seeders !== undefined ? result.seeders + ' seeders' : 'N/A for Usenet'})`);
       logger.info(``);
       logger.info(`   Bonus Points: +${result.bonusPoints.toFixed(1)}`);

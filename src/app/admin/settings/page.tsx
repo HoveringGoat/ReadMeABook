@@ -12,6 +12,7 @@ import Link from 'next/link';
 import { fetchWithAuth } from '@/lib/utils/api';
 import { IndexerFlagConfig } from '@/lib/utils/ranking-algorithm';
 import { FlagConfigRow } from '@/components/admin/FlagConfigRow';
+import { IndexersTab } from './tabs/IndexersTab';
 
 interface PlexLibrary {
   id: string;
@@ -28,6 +29,7 @@ interface IndexerConfig {
   priority: number;
   seedingTimeMinutes: number;
   rssEnabled: boolean;
+  categories?: number[];
   supportsRss?: boolean;
 }
 
@@ -115,6 +117,7 @@ export default function AdminSettings() {
   const [plexLibraries, setPlexLibraries] = useState<PlexLibrary[]>([]);
   const [absLibraries, setAbsLibraries] = useState<ABSLibrary[]>([]);
   const [indexers, setIndexers] = useState<IndexerConfig[]>([]);
+  const [configuredIndexers, setConfiguredIndexers] = useState<Array<{id: number; name: string; priority: number; seedingTimeMinutes: number; rssEnabled: boolean; categories: number[]}>>([]);
   const [flagConfigs, setFlagConfigs] = useState<IndexerFlagConfig[]>([]);
   const [pendingUsers, setPendingUsers] = useState<PendingUser[]>([]);
   const [isLocalAdmin, setIsLocalAdmin] = useState(false);
@@ -310,6 +313,19 @@ export default function AdminSettings() {
         const data = await response.json();
         setIndexers(data.indexers || []);
         setFlagConfigs(data.flagConfigs || []);
+
+        // Extract configured indexers (enabled ones) for the new IndexerManagement component
+        const configured = (data.indexers || [])
+          .filter((idx: IndexerConfig) => idx.enabled)
+          .map((idx: IndexerConfig) => ({
+            id: idx.id,
+            name: idx.name,
+            priority: idx.priority,
+            seedingTimeMinutes: idx.seedingTimeMinutes,
+            rssEnabled: idx.rssEnabled,
+            categories: idx.categories || [3030], // Include categories, default to audiobooks
+          }));
+        setConfiguredIndexers(configured);
       } else {
         console.error('Failed to fetch indexers:', response.status);
         // Don't show error on initial load, only if user explicitly tries to load
@@ -935,17 +951,21 @@ export default function AdminSettings() {
             throw new Error('Failed to save Prowlarr settings');
           }
 
-          // Save indexer configuration and flag configs if indexers are loaded
-          if (indexers.length > 0) {
-            const indexersResponse = await fetchWithAuth('/api/admin/settings/prowlarr/indexers', {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ indexers, flagConfigs }),
-            });
+          // Save indexer configuration and flag configs
+          // Convert configured indexers to the format expected by the API (with enabled: true)
+          const indexersForSave = configuredIndexers.map((idx) => ({
+            ...idx,
+            enabled: true,
+          }));
 
-            if (!indexersResponse.ok) {
-              throw new Error('Failed to save indexer configuration');
-            }
+          const indexersResponse = await fetchWithAuth('/api/admin/settings/prowlarr/indexers', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ indexers: indexersForSave, flagConfigs }),
+          });
+
+          if (!indexersResponse.ok) {
+            throw new Error('Failed to save indexer configuration');
           }
           break;
 
@@ -1441,273 +1461,17 @@ export default function AdminSettings() {
 
             {/* Prowlarr/Indexers Tab */}
             {activeTab === 'prowlarr' && (
-              <div className="space-y-6 max-w-4xl">
-                <div>
-                  <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">
-                    Indexer Configuration
-                  </h2>
-                  <p className="text-gray-600 dark:text-gray-400 mb-6">
-                    Configure your Prowlarr connection and select which indexers to use with priority and seeding time.
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Prowlarr Server URL
-                  </label>
-                  <Input
-                    type="url"
-                    value={settings.prowlarr.url}
-                    onChange={(e) => {
-                      setSettings({
-                        ...settings,
-                        prowlarr: { ...settings.prowlarr, url: e.target.value },
-                      });
-                      // Only invalidate if URL actually changed from original
-                      if (originalSettings && e.target.value !== originalSettings.prowlarr.url) {
-                        setValidated({ ...validated, prowlarr: false });
-                      }
-                    }}
-                    placeholder="http://localhost:9696"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Prowlarr API Key
-                  </label>
-                  <Input
-                    type="password"
-                    value={settings.prowlarr.apiKey}
-                    onChange={(e) => {
-                      setSettings({
-                        ...settings,
-                        prowlarr: { ...settings.prowlarr, apiKey: e.target.value },
-                      });
-                      // Only invalidate if API key actually changed from original
-                      if (originalSettings && e.target.value !== originalSettings.prowlarr.apiKey) {
-                        setValidated({ ...validated, prowlarr: false });
-                      }
-                    }}
-                    placeholder="Enter API key"
-                  />
-                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    Found in Prowlarr Settings → General → Security → API Key
-                  </p>
-                </div>
-
-                <div className="border-t border-gray-200 dark:border-gray-700 pt-6">
-                  <Button
-                    onClick={testProwlarrConnection}
-                    loading={testing}
-                    disabled={!settings.prowlarr.url || !settings.prowlarr.apiKey}
-                    variant="outline"
-                    className="w-full"
-                  >
-                    {(() => {
-                      if (originalSettings &&
-                          settings.prowlarr.url === originalSettings.prowlarr.url &&
-                          settings.prowlarr.apiKey === originalSettings.prowlarr.apiKey) {
-                        return 'Refresh Indexers';
-                      }
-                      return 'Test Connection';
-                    })()}
-                  </Button>
-                  {testResults.prowlarr && (
-                    <div className={`mt-3 p-3 rounded-lg text-sm ${
-                      testResults.prowlarr.success
-                        ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-200'
-                        : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-800 dark:text-red-200'
-                    }`}>
-                      {testResults.prowlarr.message}
-                    </div>
-                  )}
-                </div>
-
-                <div className="border-t border-gray-200 dark:border-gray-700 pt-6">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">
-                      Indexer Configuration
-                    </h3>
-                    {indexers.length > 0 && !loadingIndexers && (
-                      <span className="text-sm text-gray-500 dark:text-gray-400">
-                        {indexers.filter(idx => idx.enabled).length} enabled
-                      </span>
-                    )}
-                  </div>
-                  {loadingIndexers ? (
-                    <div className="flex items-center gap-2 py-4">
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-                      <span className="text-sm text-gray-500">Loading indexers...</span>
-                    </div>
-                  ) : indexers.length > 0 ? (
-                    <div className="space-y-4">
-                      {indexers.map((indexer) => (
-                        <div
-                          key={indexer.id}
-                          className="border border-gray-200 dark:border-gray-700 rounded-lg p-4"
-                        >
-                          <div className="flex items-start gap-4">
-                            <input
-                              type="checkbox"
-                              checked={indexer.enabled}
-                              onChange={(e) => {
-                                setIndexers(
-                                  indexers.map((idx) =>
-                                    idx.id === indexer.id
-                                      ? { ...idx, enabled: e.target.checked }
-                                      : idx
-                                  )
-                                );
-                              }}
-                              className="mt-1 h-5 w-5 rounded border-gray-300"
-                            />
-                            <div className="flex-1">
-                              <div className="flex items-center gap-2 mb-2">
-                                <h4 className="font-medium text-gray-900 dark:text-gray-100">
-                                  {indexer.name}
-                                </h4>
-                                <span className="text-xs px-2 py-1 rounded bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400">
-                                  {indexer.protocol}
-                                </span>
-                              </div>
-                              <div className="grid grid-cols-3 gap-4">
-                                <div>
-                                  <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                                    Priority (1-25)
-                                  </label>
-                                  <input
-                                    type="number"
-                                    min="1"
-                                    max="25"
-                                    value={indexer.priority}
-                                    onChange={(e) => {
-                                      const value = parseInt(e.target.value) || 10;
-                                      setIndexers(
-                                        indexers.map((idx) =>
-                                          idx.id === indexer.id
-                                            ? { ...idx, priority: Math.max(1, Math.min(25, value)) }
-                                            : idx
-                                        )
-                                      );
-                                    }}
-                                    disabled={!indexer.enabled}
-                                    className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 disabled:opacity-50"
-                                  />
-                                  <p className="text-xs text-gray-500 mt-1">Higher = preferred</p>
-                                </div>
-                                <div>
-                                  <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                                    Seeding Time (minutes)
-                                  </label>
-                                  <input
-                                    type="number"
-                                    min="0"
-                                    value={indexer.seedingTimeMinutes}
-                                    onChange={(e) => {
-                                      const value = e.target.value === '' ? 0 : parseInt(e.target.value);
-                                      setIndexers(
-                                        indexers.map((idx) =>
-                                          idx.id === indexer.id
-                                            ? { ...idx, seedingTimeMinutes: isNaN(value) ? 0 : value }
-                                            : idx
-                                        )
-                                      );
-                                    }}
-                                    disabled={!indexer.enabled}
-                                    className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 disabled:opacity-50"
-                                  />
-                                  <p className="text-xs text-gray-500 mt-1">0 = unlimited</p>
-                                </div>
-                                <div>
-                                  <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                                    RSS Monitoring
-                                  </label>
-                                  <div className="flex items-center h-[42px]">
-                                    <input
-                                      type="checkbox"
-                                      checked={indexer.rssEnabled || false}
-                                      onChange={(e) => {
-                                        setIndexers(
-                                          indexers.map((idx) =>
-                                            idx.id === indexer.id
-                                              ? { ...idx, rssEnabled: e.target.checked }
-                                              : idx
-                                          )
-                                        );
-                                      }}
-                                      disabled={!indexer.enabled || indexer.supportsRss === false}
-                                      className="h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
-                                    />
-                                  </div>
-                                  <p className="text-xs text-gray-500 mt-1">Auto check for new releases</p>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-sm text-gray-500 py-6 text-center border border-dashed border-gray-300 dark:border-gray-600 rounded-lg">
-                      <p className="mb-2">No indexers configured.</p>
-                      <p className="text-xs">
-                        {settings.prowlarr.url && settings.prowlarr.apiKey
-                          ? 'Click "Refresh Indexers" above to load available indexers from Prowlarr.'
-                          : 'Enter your Prowlarr URL and API key above, then click "Test Connection" to load indexers.'}
-                      </p>
-                    </div>
-                  )}
-                </div>
-
-                {/* Flag Configuration Section */}
-                <div className="border-t border-gray-200 dark:border-gray-700 pt-6">
-                  <div className="mb-4">
-                    <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">
-                      Indexer Flag Configuration (Optional)
-                    </h3>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
-                      Configure score bonuses or penalties for indexer flags like "Freeleech".
-                      These modifiers apply universally across all indexers and affect final torrent ranking.
-                    </p>
-                  </div>
-
-                  {flagConfigs.length > 0 && (
-                    <div className="space-y-3 mb-4">
-                      {flagConfigs.map((config, index) => (
-                        <FlagConfigRow
-                          key={index}
-                          config={config}
-                          onChange={(updated) => {
-                            const newConfigs = [...flagConfigs];
-                            newConfigs[index] = updated;
-                            setFlagConfigs(newConfigs);
-                          }}
-                          onRemove={() => {
-                            setFlagConfigs(flagConfigs.filter((_, i) => i !== index));
-                          }}
-                        />
-                      ))}
-                    </div>
-                  )}
-
-                  <Button
-                    onClick={() => {
-                      setFlagConfigs([...flagConfigs, { name: '', modifier: 0 }]);
-                    }}
-                    variant="outline"
-                    size="sm"
-                  >
-                    + Add Flag Rule
-                  </Button>
-
-                  {flagConfigs.length === 0 && (
-                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-3 italic">
-                      No flag rules configured. Flag bonuses/penalties are optional.
-                    </p>
-                  )}
-                </div>
-              </div>
+              <IndexersTab
+                settings={settings}
+                originalSettings={originalSettings}
+                indexers={configuredIndexers}
+                flagConfigs={flagConfigs}
+                onSettingsChange={setSettings}
+                onIndexersChange={setConfiguredIndexers}
+                onFlagConfigsChange={setFlagConfigs}
+                onValidationChange={setValidated}
+                validated={validated}
+              />
             )}
 
             {/* Download Client Tab */}

@@ -109,6 +109,7 @@ async function handler(req: AuthenticatedRequest) {
             id: audiobook.id,
             title: audiobook.title,
             author: audiobook.author,
+            asin: audiobook.audibleAsin || undefined,
           });
 
           logger.info(`Triggered search job for request ${newRequest.id}`);

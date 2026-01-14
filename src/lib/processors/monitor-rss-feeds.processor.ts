@@ -100,6 +100,7 @@ export async function processMonitorRssFeeds(payload: MonitorRssFeedsPayload): P
             id: audiobook.id,
             title: audiobook.title,
             author: audiobook.author,
+            asin: audiobook.audibleAsin || undefined,
           });
           matched++;
           logger.info(`Triggered search job for request ${request.id}`);

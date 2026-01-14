@@ -12,10 +12,16 @@ import { RMABLogger } from '../utils/logger';
 const logger = RMABLogger.create('Prowlarr');
 
 export interface SearchFilters {
-  category?: number;
+  category?: number; // Deprecated: use categories instead
+  categories?: number[]; // Array of category IDs to search
   minSeeders?: number;
   maxResults?: number;
   indexerIds?: number[];
+}
+
+export interface IndexerCategory {
+  id: number;
+  name: string;
 }
 
 export interface Indexer {
@@ -26,6 +32,7 @@ export interface Indexer {
   priority: number;
   capabilities?: {
     supportsRss?: boolean;
+    categories?: IndexerCategory[];
   };
   fields?: Array<{
     name: string;
@@ -119,12 +126,23 @@ export class ProwlarrService {
       const configService = getConfigService();
       const clientType = (await configService.get('download_client_type')) || 'qbittorrent';
 
+      // Determine which categories to search
+      // Priority: filters.categories > filters.category > defaultCategory
+      let categoriesToSearch: number[];
+      if (filters?.categories && filters.categories.length > 0) {
+        categoriesToSearch = filters.categories;
+      } else if (filters?.category) {
+        categoriesToSearch = [filters.category];
+      } else {
+        categoriesToSearch = [this.defaultCategory];
+      }
+
       const params: Record<string, any> = {
         query,
         type: 'search',
         limit: 100, // Maximum results to return from Prowlarr
         extended: 1, // Enable searching in tags, labels, and metadata
-        categories: filters?.category?.toString() || this.defaultCategory.toString(), // 3030 = Audiobooks (standard Newznab category)
+        categories: categoriesToSearch, // Will be serialized as categories=3030&categories=3040 etc
       };
 
       // Filter by specific indexers if provided

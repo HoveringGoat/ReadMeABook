@@ -29,8 +29,8 @@ Manages background job queue using Bull (Redis-backed) for async tasks: searchin
 1. **search_indexers** - Search Prowlarr for torrents
 2. **monitor_download** - Poll progress (10s intervals)
 3. **organize_files** - Move to media library, set status to 'downloaded'
-4. **scan_plex** - Full scan of Plex library, match 'downloaded' requests
-5. **plex_recently_added_check** - Lightweight polling of recently added items (top 10)
+4. **scan_plex** - Full scan of library, match all non-terminal requests (excludes: available, cancelled)
+5. **plex_recently_added_check** - Lightweight polling of recently added items, match all non-terminal requests
 6. **match_plex** - Fuzzy match to Plex item (deprecated - now handled by scan_plex)
 
 ## Special Behaviors
@@ -57,10 +57,18 @@ Manages background job queue using Bull (Redis-backed) for async tasks: searchin
 - No longer triggers immediate match_plex job
 
 **scan_plex:**
-- Scans Plex library and populates plex_library table
-- After scan, checks for requests with status 'downloaded'
-- Fuzzy matches downloaded requests against Plex library (70% threshold)
-- Matched requests → 'available' status with plexGuid linked
+- Full library scan (Plex/Audiobookshelf) and populates plex_library table
+- Checks all non-terminal request statuses for matches (excludes: available, cancelled)
+- Fuzzy matches via ASIN/ISBN/title/author (70% threshold)
+- Matched requests → 'available' status with plexGuid/absItemId linked
+- Clears errorMessage and retry counters on match
+- Use case: Manual library imports automatically complete stuck requests
+
+**plex_recently_added_check:**
+- Polls recently added items (top 10) every 5 minutes
+- Matches all non-terminal request statuses against new library items
+- Same matching logic as scan_plex (ASIN priority, fuzzy fallback)
+- Clears error state and retry counters on match
 
 ## Job Payloads
 

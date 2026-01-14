@@ -53,6 +53,7 @@ export async function processRetryMissingTorrents(payload: RetryMissingTorrentsP
           id: request.audiobook.id,
           title: request.audiobook.title,
           author: request.audiobook.author,
+          asin: request.audiobook.audibleAsin || undefined,
         });
         triggered++;
         logger.info(`Triggered search for request ${request.id}: ${request.audiobook.title}`);

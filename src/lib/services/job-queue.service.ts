@@ -37,6 +37,7 @@ export interface SearchIndexersPayload extends JobPayload {
     id: string;
     title: string;
     author: string;
+    asin?: string; // Optional ASIN for runtime-based size scoring
   };
 }
 
@@ -441,7 +442,7 @@ export class JobQueueService {
   /**
    * Add search indexers job
    */
-  async addSearchJob(requestId: string, audiobook: { id: string; title: string; author: string }): Promise<string> {
+  async addSearchJob(requestId: string, audiobook: { id: string; title: string; author: string; asin?: string }): Promise<string> {
     return await this.addJob(
       'search_indexers',
       {

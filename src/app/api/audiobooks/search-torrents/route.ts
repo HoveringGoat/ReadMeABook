@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { getProwlarrService } from '@/lib/integrations/prowlarr.service';
 import { rankTorrents } from '@/lib/utils/ranking-algorithm';
+import { groupIndexersByCategories, getGroupDescription } from '@/lib/utils/indexer-grouping';
 import { z } from 'zod';
 import { RMABLogger } from '@/lib/utils/logger';
 
@@ -17,6 +18,7 @@ const logger = RMABLogger.create('API.AudiobookSearch');
 const SearchSchema = z.object({
   title: z.string(),
   author: z.string(),
+  asin: z.string().optional(), // Optional ASIN for runtime-based size scoring
 });
 
 /**
@@ -34,7 +36,7 @@ export async function POST(request: NextRequest) {
       }
 
       const body = await req.json();
-      const { title, author } = SearchSchema.parse(body);
+      const { title, author, asin } = SearchSchema.parse(body);
 
       // Get enabled indexers from configuration
       const { getConfigService } = await import('@/lib/services/config.service');
@@ -49,9 +51,8 @@ export async function POST(request: NextRequest) {
       }
 
       const indexersConfig = JSON.parse(indexersConfigStr);
-      const enabledIndexerIds = indexersConfig.map((indexer: any) => indexer.id);
 
-      if (enabledIndexerIds.length === 0) {
+      if (indexersConfig.length === 0) {
         return NextResponse.json(
           { error: 'ConfigError', message: 'No indexers enabled. Please enable at least one indexer in settings.' },
           { status: 400 }
@@ -67,18 +68,43 @@ export async function POST(request: NextRequest) {
       const flagConfigStr = await configService.get('indexer_flag_config');
       const flagConfigs = flagConfigStr ? JSON.parse(flagConfigStr) : [];
 
-      // Search Prowlarr for torrents - ONLY enabled indexers
-      const prowlarr = await getProwlarrService();
-      const searchQuery = title; // Title only - cast wide net
+      // Group indexers by their category configuration
+      // This minimizes API calls while ensuring each indexer only searches its configured categories
+      const groups = groupIndexersByCategories(indexersConfig);
 
-      logger.info(`Searching ${enabledIndexerIds.length} enabled indexers`, { searchQuery });
+      logger.info(`Searching ${indexersConfig.length} enabled indexers in ${groups.length} group${groups.length > 1 ? 's' : ''}`, { searchQuery: title });
 
-      const results = await prowlarr.search(searchQuery, {
-        indexerIds: enabledIndexerIds,
-        maxResults: 100, // Increased limit for broader search
+      // Log each group for transparency
+      groups.forEach((group, index) => {
+        logger.debug(`Group ${index + 1}: ${getGroupDescription(group)}`);
       });
 
-      logger.debug(`Found ${results.length} raw results`, { title, author });
+      // Search Prowlarr for each group and combine results
+      const prowlarr = await getProwlarrService();
+      const searchQuery = title; // Title only - cast wide net
+      const allResults = [];
+
+      for (let i = 0; i < groups.length; i++) {
+        const group = groups[i];
+        logger.debug(`Searching group ${i + 1}/${groups.length}: ${getGroupDescription(group)}`);
+
+        try {
+          const groupResults = await prowlarr.search(searchQuery, {
+            categories: group.categories,
+            indexerIds: group.indexerIds,
+            maxResults: 100, // Limit per group
+          });
+
+          logger.debug(`Group ${i + 1} returned ${groupResults.length} results`);
+          allResults.push(...groupResults);
+        } catch (error) {
+          logger.error(`Group ${i + 1} search failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+          // Continue with other groups even if one fails
+        }
+      }
+
+      const results = allResults;
+      logger.info(`Found ${results.length} total results from ${groups.length} group${groups.length > 1 ? 's' : ''}`);
 
       if (results.length === 0) {
         return NextResponse.json({
@@ -88,8 +114,37 @@ export async function POST(request: NextRequest) {
         });
       }
 
+      // Fetch runtime from Audnexus if ASIN provided (for size-based scoring/filtering)
+      let durationMinutes: number | undefined;
+      if (asin) {
+        const { getAudibleService } = await import('@/lib/integrations/audible.service');
+        const audibleService = getAudibleService();
+        const runtime = await audibleService.getRuntime(asin);
+        if (runtime) {
+          durationMinutes = runtime;
+          logger.info(`Fetched runtime: ${runtime} minutes for ASIN ${asin}`);
+        } else {
+          logger.debug(`No runtime found for ASIN ${asin}`);
+        }
+      }
+
+      // Log filter info
+      const sizeMBThreshold = 20;
+      const preFilterCount = results.length;
+      const belowThreshold = results.filter(r => (r.size / (1024 * 1024)) < sizeMBThreshold);
+      if (belowThreshold.length > 0) {
+        logger.info(`Will filter ${belowThreshold.length} results < ${sizeMBThreshold} MB (likely ebooks)`);
+      }
+
       // Rank torrents using the ranking algorithm with indexer priorities and flag configs
-      const rankedResults = rankTorrents(results, { title, author }, indexerPriorities, flagConfigs);
+      // Note: rankTorrents now filters out results < 20 MB internally
+      const rankedResults = rankTorrents(results, { title, author, durationMinutes }, indexerPriorities, flagConfigs);
+
+      // Log filter results
+      const postFilterCount = rankedResults.length;
+      if (postFilterCount < preFilterCount) {
+        logger.info(`Filtered out ${preFilterCount - postFilterCount} results < ${sizeMBThreshold} MB`);
+      }
 
       // No threshold filtering - show all results like interactive search
       // User can see scores and make their own decision
@@ -103,12 +158,18 @@ export async function POST(request: NextRequest) {
         logger.debug(`Top ${top3.length} results (out of ${rankedResults.length} total)`);
         logger.debug('--------------------------------------------------------');
         top3.forEach((result, index) => {
+          const sizeMB = (result.size / (1024 * 1024)).toFixed(1);
+          const mbPerMin = durationMinutes ? ((result.size / (1024 * 1024)) / durationMinutes).toFixed(2) : 'N/A';
+
           logger.debug(`${index + 1}. "${result.title}"`, {
             indexer: result.indexer,
             indexerId: result.indexerId,
             baseScore: `${result.score.toFixed(1)}/100`,
             matchScore: `${result.breakdown.matchScore.toFixed(1)}/60`,
-            formatScore: `${result.breakdown.formatScore.toFixed(1)}/25 (${result.format || 'unknown'})`,
+            formatScore: `${result.breakdown.formatScore.toFixed(1)}/10 (${result.format || 'unknown'})`,
+            sizeScore: durationMinutes
+              ? `${result.breakdown.sizeScore.toFixed(1)}/15 (${sizeMB} MB, ${mbPerMin} MB/min)`
+              : 'N/A (no runtime)',
             seederScore: `${result.breakdown.seederScore.toFixed(1)}/15 (${result.seeders !== undefined ? result.seeders + ' seeders' : 'N/A for Usenet'})`,
             bonusPoints: `+${result.bonusPoints.toFixed(1)}`,
             bonusModifiers: result.bonusModifiers.map(mod => `${mod.reason}: +${mod.points.toFixed(1)}`),

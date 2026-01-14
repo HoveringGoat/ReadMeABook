@@ -806,6 +806,36 @@ export class AudibleService {
   }
 
   /**
+   * Get runtime (in minutes) for an audiobook by ASIN
+   * Lightweight method for size validation during search
+   * Returns null if not found or error
+   */
+  async getRuntime(asin: string): Promise<number | null> {
+    try {
+      // Use Audnexus API for fast, reliable runtime data
+      const audnexusRegion = AUDIBLE_REGIONS[this.region].audnexusParam;
+
+      const response = await axios.get(`https://api.audnex.us/books/${asin}`, {
+        params: { region: audnexusRegion },
+        timeout: 5000, // Quick timeout for search performance
+        headers: { 'User-Agent': 'ReadMeABook/1.0' },
+      });
+
+      const runtimeMin = response.data?.runtimeLengthMin;
+      if (runtimeMin) {
+        return parseInt(runtimeMin);
+      }
+
+      return null;
+    } catch (error: any) {
+      if (error.response?.status !== 404) {
+        logger.debug(`Runtime fetch failed for ASIN ${asin}: ${error.message}`);
+      }
+      return null;
+    }
+  }
+
+  /**
    * Add delay between requests to respect rate limits
    */
   private async delay(ms: number): Promise<void> {

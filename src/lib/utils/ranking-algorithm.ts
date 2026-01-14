@@ -45,6 +45,7 @@ export interface BonusModifier {
 
 export interface ScoreBreakdown {
   formatScore: number;
+  sizeScore: number;
   seederScore: number;
   matchScore: number;
   totalScore: number;
@@ -64,7 +65,7 @@ export class RankingAlgorithm {
   /**
    * Rank all torrents and return sorted by finalScore (best first)
    * @param torrents - Array of torrent results to rank
-   * @param audiobook - Audiobook request details for matching
+   * @param audiobook - Audiobook request details for matching (includes durationMinutes for size scoring)
    * @param indexerPriorities - Optional map of indexerId to priority (1-25), defaults to 10
    * @param flagConfigs - Optional array of flag configurations for bonus/penalty modifiers
    */
@@ -74,13 +75,20 @@ export class RankingAlgorithm {
     indexerPriorities?: Map<number, number>,
     flagConfigs?: IndexerFlagConfig[]
   ): RankedTorrent[] {
-    const ranked = torrents.map((torrent) => {
+    // Filter out files < 20 MB (likely ebooks/samples)
+    const filteredTorrents = torrents.filter((torrent) => {
+      const sizeMB = torrent.size / (1024 * 1024);
+      return sizeMB >= 20;
+    });
+
+    const ranked = filteredTorrents.map((torrent) => {
       // Calculate base scores (0-100)
       const formatScore = this.scoreFormat(torrent);
+      const sizeScore = this.scoreSize(torrent, audiobook.durationMinutes);
       const seederScore = this.scoreSeeders(torrent.seeders);
       const matchScore = this.scoreMatch(torrent, audiobook);
 
-      const baseScore = formatScore + seederScore + matchScore;
+      const baseScore = formatScore + sizeScore + seederScore + matchScore;
 
       // Calculate bonus modifiers
       const bonusModifiers: BonusModifier[] = [];
@@ -136,16 +144,18 @@ export class RankingAlgorithm {
         rank: 0, // Will be assigned after sorting
         breakdown: {
           formatScore,
+          sizeScore,
           seederScore,
           matchScore,
           totalScore: baseScore,
           notes: this.generateNotes(torrent, {
             formatScore,
+            sizeScore,
             seederScore,
             matchScore,
             totalScore: baseScore,
             notes: [],
-          }),
+          }, audiobook.durationMinutes),
         },
       };
     });
@@ -176,46 +186,87 @@ export class RankingAlgorithm {
     audiobook: AudiobookRequest
   ): ScoreBreakdown {
     const formatScore = this.scoreFormat(torrent);
+    const sizeScore = this.scoreSize(torrent, audiobook.durationMinutes);
     const seederScore = this.scoreSeeders(torrent.seeders);
     const matchScore = this.scoreMatch(torrent, audiobook);
-    const totalScore = formatScore + seederScore + matchScore;
+    const totalScore = formatScore + sizeScore + seederScore + matchScore;
 
     return {
       formatScore,
+      sizeScore,
       seederScore,
       matchScore,
       totalScore,
       notes: this.generateNotes(torrent, {
         formatScore,
+        sizeScore,
         seederScore,
         matchScore,
         totalScore,
         notes: [],
-      }),
+      }, audiobook.durationMinutes),
     };
   }
 
   /**
-   * Score format quality (25 points max)
-   * M4B with chapters: 25 pts
-   * M4B without chapters: 22 pts
-   * M4A: 16 pts
-   * MP3: 10 pts
-   * Other: 3 pts
+   * Score format quality (10 points max)
+   * Reduced from 25 to make room for data-driven size scoring
+   * M4B with chapters: 10 pts
+   * M4B without chapters: 9 pts
+   * M4A: 6 pts
+   * MP3: 4 pts
+   * Other: 1 pt
    */
   private scoreFormat(torrent: TorrentResult): number {
     const format = this.detectFormat(torrent);
 
     switch (format) {
       case 'M4B':
-        return torrent.hasChapters !== false ? 25 : 22;
+        return torrent.hasChapters !== false ? 10 : 9;
       case 'M4A':
-        return 16;
+        return 6;
       case 'MP3':
-        return 10;
+        return 4;
       default:
-        return 3;
+        return 1;
     }
+  }
+
+  /**
+   * Score file size quality (15 points max)
+   * Uses book runtime and file size to validate correct file type
+   * Filters out ebooks and ranks audiobook quality
+   *
+   * @param torrent - Torrent result with size in bytes
+   * @param runtimeMinutes - Book runtime in minutes from Audnexus
+   * @returns 0-15 points based on MB/min ratio
+   *
+   * Algorithm:
+   * - >= 1.0 MB/min → 15/15 points (high quality baseline)
+   * - Linear scaling below 1.0 MB/min
+   * - 0 points if no runtime data (graceful degradation)
+   *
+   * Note: Files < 20 MB are pre-filtered in rankTorrents()
+   */
+  private scoreSize(torrent: TorrentResult, runtimeMinutes: number | undefined): number {
+    // Graceful degradation: no runtime data = no size scoring
+    if (!runtimeMinutes || runtimeMinutes === 0) {
+      return 0;
+    }
+
+    const sizeMB = torrent.size / (1024 * 1024);
+    const mbPerMin = sizeMB / runtimeMinutes;
+
+    // High quality baseline: 1.0 MB/min or higher gets full points
+    // This is ~64 kbps MP3 equivalent
+    if (mbPerMin >= 1.0) {
+      return 15;
+    }
+
+    // Linear scaling below baseline
+    // 0.5 MB/min = 7.5 points
+    // 0.3 MB/min = 4.5 points
+    return mbPerMin * 15;
   }
 
   /**
@@ -429,7 +480,8 @@ export class RankingAlgorithm {
    */
   private generateNotes(
     torrent: TorrentResult,
-    breakdown: ScoreBreakdown
+    breakdown: ScoreBreakdown,
+    runtimeMinutes?: number
   ): string[] {
     const notes: string[] = [];
 
@@ -446,6 +498,24 @@ export class RankingAlgorithm {
       notes.push('Acceptable format (MP3)');
     } else {
       notes.push('Unknown or uncommon format');
+    }
+
+    // Size notes
+    if (runtimeMinutes && runtimeMinutes > 0) {
+      const sizeMB = torrent.size / (1024 * 1024);
+      const mbPerMin = sizeMB / runtimeMinutes;
+
+      if (mbPerMin >= 1.5) {
+        notes.push('✓ Premium quality (high bitrate)');
+      } else if (mbPerMin >= 1.0) {
+        notes.push('✓ High quality');
+      } else if (mbPerMin >= 0.5) {
+        notes.push('Standard quality');
+      } else if (mbPerMin >= 0.3) {
+        notes.push('⚠️ Low quality (low bitrate)');
+      } else {
+        notes.push('⚠️ Very low quality - may be ebook');
+      }
     }
 
     // Seeder notes (skip for NZB/Usenet results which don't have seeders)

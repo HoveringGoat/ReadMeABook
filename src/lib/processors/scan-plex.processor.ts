@@ -316,23 +316,23 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
       logger.info(`No orphaned audiobooks found`);
     }
 
-    // 6. Match downloaded requests against library
-    logger.info(`Checking for downloaded requests to match...`);
-    const downloadedRequests = await prisma.request.findMany({
+    // 6. Match all non-terminal requests against library
+    logger.info(`Checking for matchable requests...`);
+    const matchableRequests = await prisma.request.findMany({
       where: {
-        status: 'downloaded',
+        status: { notIn: ['available', 'cancelled'] },
         deletedAt: null,
       },
       include: { audiobook: true },
-      take: 50, // Limit to prevent overwhelming
+      take: 100, // Increased from 50 to handle more eligible requests
     });
 
-    logger.info(`Found ${downloadedRequests.length} downloaded requests to match`);
+    logger.info(`Found ${matchableRequests.length} matchable requests (all non-terminal statuses)`);
 
     let matchedCount = 0;
     const { findPlexMatch } = await import('../utils/audiobook-matcher');
 
-    for (const request of downloadedRequests) {
+    for (const request of matchableRequests) {
       try {
         const audiobook = request.audiobook;
 
@@ -346,7 +346,11 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
         });
 
         if (match) {
-          logger.info(`Match found! "${audiobook.title}" -> "${match.title}"`);
+          const originalStatus = request.status;
+          logger.info(
+            `Match found! "${audiobook.title}" -> "${match.title}"` +
+            (originalStatus !== 'downloaded' ? ` (was '${originalStatus}')` : '')
+          );
 
           // Update audiobook with matched library item ID (plexGuid or abs_item_id)
           const updateData: any = { updatedAt: new Date() };
@@ -362,12 +366,16 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
             data: updateData,
           });
 
-          // Update request to available
+          // Update request to available and clear any error state
           await prisma.request.update({
             where: { id: request.id },
             data: {
               status: 'available',
               completedAt: new Date(),
+              errorMessage: null,        // Clear any error state
+              searchAttempts: 0,          // Reset retry counters
+              downloadAttempts: 0,
+              importAttempts: 0,
               updatedAt: new Date(),
             },
           });
@@ -389,7 +397,7 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
       }
     }
 
-    logger.info(`Matched ${matchedCount}/${downloadedRequests.length} downloaded requests`, {
+    logger.info(`Matched ${matchedCount}/${matchableRequests.length} requests`, {
       totalScanned: libraryItems.length,
       newCount,
       updatedCount,

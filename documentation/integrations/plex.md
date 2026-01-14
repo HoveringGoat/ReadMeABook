@@ -80,6 +80,40 @@ API Docs: `/PlexMediaServerAPIDocs.json`
 **Benefits:** Lightweight polling for new items + comprehensive matching for downloaded requests
 **Note:** Requests transition: pending → searching → downloading → processing → downloaded → available (after detection)
 
+## Auto-Completion of Stuck Requests
+
+Library scans (full and incremental) now check **all non-terminal requests** for matches:
+
+**Eligible statuses:**
+- pending, searching, downloading, processing, downloaded
+- failed, awaiting_search, awaiting_import, warn
+
+**Excluded statuses:**
+- available (already completed)
+- cancelled (user cancelled)
+
+**Use Case:**
+1. Request stuck in 'awaiting_search' or 'failed' status
+2. User manually imports audiobook to library (via Plex/ABS or external tool)
+3. Next library scan (manual trigger or scheduled recently-added check)
+4. Request auto-matches and marks as 'available'
+5. Error messages and retry counters cleared
+
+**State Cleanup on Match:**
+- errorMessage → null
+- searchAttempts → 0
+- downloadAttempts → 0
+- importAttempts → 0
+- completedAt → scan timestamp
+
+**Edge Cases:**
+- Active downloads/jobs continue but become no-ops (download completes, organize skips)
+- Torrent/NZB remains in download client (manual cleanup if desired)
+
+**Logging:**
+- Transitions from non-downloaded statuses logged with original status: `Match found! "Book" → "Library Book" (was 'failed')`
+- Provides visibility into which stuck requests were auto-completed
+
 ## Data Models
 
 ```typescript
