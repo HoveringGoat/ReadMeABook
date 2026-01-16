@@ -144,8 +144,8 @@ describe('E-book sidecar', () => {
         return {
           data: {
             pipe: (dest: EventEmitter) => {
-              // Emit synchronously to avoid race condition with download timeout
-              setImmediate(() => dest.emit('finish'));
+              // Use microtask to emit before timers run (avoids race with download timeout)
+              queueMicrotask(() => dest.emit('finish'));
               return dest;
             },
           },
@@ -193,8 +193,8 @@ describe('E-book sidecar', () => {
         return {
           data: {
             pipe: (dest: EventEmitter) => {
-              // Emit synchronously to avoid race condition with download timeout
-              setImmediate(() => dest.emit('finish'));
+              // Use microtask to emit before timers run (avoids race with download timeout)
+              queueMicrotask(() => dest.emit('finish'));
               return dest;
             },
           },
@@ -337,8 +337,8 @@ describe('E-book sidecar', () => {
         return {
           data: {
             pipe: (dest: EventEmitter) => {
-              // Emit synchronously to avoid race condition with download timeout
-              setImmediate(() => dest.emit('finish'));
+              // Use microtask to emit before timers run (avoids race with download timeout)
+              queueMicrotask(() => dest.emit('finish'));
               return dest;
             },
           },
@@ -622,8 +622,8 @@ describe('E-book sidecar', () => {
         return {
           data: {
             pipe: (dest: EventEmitter) => {
-              // Emit synchronously to avoid race condition with download timeout
-              setImmediate(() => dest.emit('finish'));
+              // Use microtask to emit before timers run (avoids race with download timeout)
+              queueMicrotask(() => dest.emit('finish'));
               return dest;
             },
           },
