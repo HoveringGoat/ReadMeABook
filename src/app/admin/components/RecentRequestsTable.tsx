@@ -5,8 +5,7 @@
 
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import { useSearchParams, useRouter, usePathname } from 'next/navigation';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 import useSWR from 'swr';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -126,23 +125,56 @@ function SortIcon({ field, currentSort, currentOrder }: { field: SortField; curr
   );
 }
 
+// Helper to get initial params from URL (client-side only)
+function getInitialParams(): {
+  page: number;
+  pageSize: number;
+  search: string;
+  status: string;
+  userId: string;
+  sortBy: SortField;
+  sortOrder: SortOrder;
+} {
+  if (typeof window === 'undefined') {
+    return {
+      page: 1,
+      pageSize: 25,
+      search: '',
+      status: 'all',
+      userId: '',
+      sortBy: 'createdAt',
+      sortOrder: 'desc',
+    };
+  }
+  const params = new URLSearchParams(window.location.search);
+  return {
+    page: parseInt(params.get('page') || '1', 10),
+    pageSize: parseInt(params.get('pageSize') || '25', 10),
+    search: params.get('search') || '',
+    status: params.get('status') || 'all',
+    userId: params.get('userId') || '',
+    sortBy: (params.get('sortBy') || 'createdAt') as SortField,
+    sortOrder: (params.get('sortOrder') || 'desc') as SortOrder,
+  };
+}
+
 export function RecentRequestsTable({ ebookSidecarEnabled = false }: RecentRequestsTableProps) {
-  const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
   const toast = useToast();
 
-  // Get filter state from URL
-  const page = parseInt(searchParams.get('page') || '1', 10);
-  const pageSize = parseInt(searchParams.get('pageSize') || '25', 10);
-  const search = searchParams.get('search') || '';
-  const status = searchParams.get('status') || 'all';
-  const userId = searchParams.get('userId') || '';
-  const sortBy = (searchParams.get('sortBy') || 'createdAt') as SortField;
-  const sortOrder = (searchParams.get('sortOrder') || 'desc') as SortOrder;
+  // Get initial filter state from URL (only evaluated once due to lazy init)
+  const [initialParams] = useState(getInitialParams);
+  const [page, setPage] = useState(initialParams.page);
+  const [pageSize, setPageSize] = useState(initialParams.pageSize);
+  const [searchInput, setSearchInput] = useState(initialParams.search);
+  const [debouncedSearch, setDebouncedSearch] = useState(initialParams.search);
+  const [status, setStatus] = useState(initialParams.status);
+  const [userId, setUserId] = useState(initialParams.userId);
+  const [sortBy, setSortBy] = useState<SortField>(initialParams.sortBy);
+  const [sortOrder, setSortOrder] = useState<SortOrder>(initialParams.sortOrder);
 
-  // Local search input state for debouncing
-  const [searchInput, setSearchInput] = useState(search);
+  // Track mounted state and last synced URL to handle browser back/forward
+  const isMounted = useRef(false);
+  const lastSyncedUrl = useRef('');
 
   // Dialog states
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -153,71 +185,133 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false }: RecentReque
   const [isDeleting, setIsDeleting] = useState(false);
   const [isFetchingEbook, setIsFetchingEbook] = useState(false);
 
-  // Build API URL with current filters
-  const apiUrl = `/api/admin/requests?page=${page}&pageSize=${pageSize}&search=${encodeURIComponent(search)}&status=${status}&userId=${userId}&sortBy=${sortBy}&sortOrder=${sortOrder}`;
+  // Build API URL with current local filters
+  const apiUrl = `/api/admin/requests?page=${page}&pageSize=${pageSize}&search=${encodeURIComponent(debouncedSearch)}&status=${status}&userId=${userId}&sortBy=${sortBy}&sortOrder=${sortOrder}`;
 
   // Fetch requests with SWR
   const { data, error, isLoading } = useSWR<RequestsResponse>(apiUrl, authenticatedFetcher, {
     refreshInterval: 10000,
+    keepPreviousData: true, // Keep showing old data while fetching new data to prevent layout shifts
   });
 
   // Fetch users for filter dropdown
   const { data: usersData } = useSWR<{ users: User[] }>('/api/admin/users', authenticatedFetcher);
 
-  // Update URL with new params
-  const updateParams = useCallback(
-    (updates: Record<string, string | number>) => {
-      const params = new URLSearchParams(searchParams.toString());
+  // Build URL string for syncing
+  const buildUrlString = useCallback((params: {
+    page: number;
+    pageSize: number;
+    search: string;
+    status: string;
+    userId: string;
+    sortBy: string;
+    sortOrder: string;
+  }) => {
+    const pathname = typeof window !== 'undefined' ? window.location.pathname : '/admin';
+    const urlParams = new URLSearchParams();
+    if (params.page !== 1) urlParams.set('page', String(params.page));
+    if (params.pageSize !== 25) urlParams.set('pageSize', String(params.pageSize));
+    if (params.search) urlParams.set('search', params.search);
+    if (params.status !== 'all') urlParams.set('status', params.status);
+    if (params.userId) urlParams.set('userId', params.userId);
+    if (params.sortBy !== 'createdAt') urlParams.set('sortBy', params.sortBy);
+    if (params.sortOrder !== 'desc') urlParams.set('sortOrder', params.sortOrder);
+    return urlParams.toString() ? `${pathname}?${urlParams.toString()}` : pathname;
+  }, []);
 
-      Object.entries(updates).forEach(([key, value]) => {
-        if (value === '' || value === 'all' || (key === 'page' && value === 1) || (key === 'pageSize' && value === 25)) {
-          params.delete(key);
-        } else {
-          params.set(key, String(value));
-        }
-      });
+  // Sync URL when filters change (shallow, doesn't cause re-render)
+  useEffect(() => {
+    if (!isMounted.current) {
+      isMounted.current = true;
+      return;
+    }
 
-      // Reset to page 1 when filters change (except when changing page itself)
-      if (!('page' in updates)) {
-        params.delete('page');
-      }
+    const newUrl = buildUrlString({
+      page,
+      pageSize,
+      search: debouncedSearch,
+      status,
+      userId,
+      sortBy,
+      sortOrder,
+    });
 
-      const newUrl = params.toString() ? `${pathname}?${params.toString()}` : pathname;
-      router.push(newUrl, { scroll: false });
-    },
-    [pathname, router, searchParams]
-  );
+    if (newUrl !== lastSyncedUrl.current && typeof window !== 'undefined') {
+      lastSyncedUrl.current = newUrl;
+      window.history.replaceState(null, '', newUrl);
+    }
+  }, [page, pageSize, debouncedSearch, status, userId, sortBy, sortOrder, buildUrlString]);
+
+  // Handle browser back/forward navigation
+  useEffect(() => {
+    const handlePopState = () => {
+      const params = new URLSearchParams(window.location.search);
+      setPage(parseInt(params.get('page') || '1', 10));
+      setPageSize(parseInt(params.get('pageSize') || '25', 10));
+      const newSearch = params.get('search') || '';
+      setSearchInput(newSearch);
+      setDebouncedSearch(newSearch);
+      setStatus(params.get('status') || 'all');
+      setUserId(params.get('userId') || '');
+      setSortBy((params.get('sortBy') || 'createdAt') as SortField);
+      setSortOrder((params.get('sortOrder') || 'desc') as SortOrder);
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
   // Debounce search input
   useEffect(() => {
     const timer = setTimeout(() => {
-      if (searchInput !== search) {
-        updateParams({ search: searchInput });
+      if (searchInput !== debouncedSearch) {
+        setDebouncedSearch(searchInput);
+        setPage(1); // Reset to page 1 on search change
       }
     }, 300);
 
     return () => clearTimeout(timer);
-  }, [searchInput, search, updateParams]);
+  }, [searchInput, debouncedSearch]);
 
-  // Sync search input with URL param on mount
-  useEffect(() => {
-    setSearchInput(search);
-  }, [search]);
+  // Helper to update filters and reset page
+  const updateFilter = useCallback((key: string, value: string | number) => {
+    switch (key) {
+      case 'status':
+        setStatus(value as string);
+        setPage(1);
+        break;
+      case 'userId':
+        setUserId(value as string);
+        setPage(1);
+        break;
+      case 'pageSize':
+        setPageSize(value as number);
+        setPage(1);
+        break;
+      case 'page':
+        setPage(value as number);
+        break;
+    }
+  }, []);
 
   const handleSort = (field: SortField) => {
     if (field === sortBy) {
-      updateParams({ sortOrder: sortOrder === 'asc' ? 'desc' : 'asc' });
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
     } else {
-      updateParams({ sortBy: field, sortOrder: 'desc' });
+      setSortBy(field);
+      setSortOrder('desc');
     }
   };
 
   const clearFilters = () => {
     setSearchInput('');
-    router.push(pathname, { scroll: false });
+    setDebouncedSearch('');
+    setStatus('all');
+    setUserId('');
+    setPage(1);
   };
 
-  const hasActiveFilters = search || status !== 'all' || userId;
+  const hasActiveFilters = debouncedSearch || status !== 'all' || userId;
 
   // Action handlers
   const handleDeleteClick = (requestId: string, title: string) => {
@@ -392,7 +486,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false }: RecentReque
           {/* Status Filter */}
           <select
             value={status}
-            onChange={(e) => updateParams({ status: e.target.value })}
+            onChange={(e) => updateFilter('status', e.target.value)}
             className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm min-w-[160px]"
           >
             {STATUS_OPTIONS.map((option) => (
@@ -405,7 +499,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false }: RecentReque
           {/* User Filter */}
           <select
             value={userId}
-            onChange={(e) => updateParams({ userId: e.target.value })}
+            onChange={(e) => updateFilter('userId', e.target.value)}
             className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm min-w-[160px]"
           >
             <option value="">All Users</option>
@@ -597,7 +691,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false }: RecentReque
                   <label className="text-sm text-gray-700 dark:text-gray-300">Show:</label>
                   <select
                     value={pageSize}
-                    onChange={(e) => updateParams({ pageSize: parseInt(e.target.value, 10) })}
+                    onChange={(e) => updateFilter('pageSize', parseInt(e.target.value, 10))}
                     className="px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   >
                     {PAGE_SIZE_OPTIONS.map((size) => (
@@ -611,7 +705,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false }: RecentReque
                 {/* Page navigation */}
                 <div className="flex items-center gap-1">
                   <button
-                    onClick={() => updateParams({ page: 1 })}
+                    onClick={() => setPage(1)}
                     disabled={page === 1}
                     className="p-2 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                     title="First page"
@@ -621,7 +715,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false }: RecentReque
                     </svg>
                   </button>
                   <button
-                    onClick={() => updateParams({ page: page - 1 })}
+                    onClick={() => setPage(page - 1)}
                     disabled={page === 1}
                     className="p-2 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                     title="Previous page"
@@ -647,7 +741,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false }: RecentReque
                       return (
                         <button
                           key={pageNum}
-                          onClick={() => updateParams({ page: pageNum })}
+                          onClick={() => setPage(pageNum)}
                           className={`w-8 h-8 rounded-lg text-sm font-medium transition-colors ${
                             page === pageNum
                               ? 'bg-blue-600 text-white'
@@ -661,7 +755,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false }: RecentReque
                   </div>
 
                   <button
-                    onClick={() => updateParams({ page: page + 1 })}
+                    onClick={() => setPage(page + 1)}
                     disabled={page === totalPages}
                     className="p-2 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                     title="Next page"
@@ -671,7 +765,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false }: RecentReque
                     </svg>
                   </button>
                   <button
-                    onClick={() => updateParams({ page: totalPages })}
+                    onClick={() => setPage(totalPages)}
                     disabled={page === totalPages}
                     className="p-2 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                     title="Last page"
