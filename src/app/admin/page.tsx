@@ -13,7 +13,7 @@ import { ActiveDownloadsTable } from './components/ActiveDownloadsTable';
 import { RecentRequestsTable } from './components/RecentRequestsTable';
 import { ToastProvider, useToast } from '@/components/ui/Toast';
 import { formatDistanceToNow } from 'date-fns';
-import { useState, Suspense } from 'react';
+import { useState } from 'react';
 
 interface PendingApprovalRequest {
   id: string;
@@ -488,19 +488,9 @@ function AdminDashboardContent() {
               <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-4">
                 Request Management
               </h2>
-              <Suspense
-                fallback={
-                  <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-8">
-                    <div className="flex items-center justify-center">
-                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-                    </div>
-                  </div>
-                }
-              >
-                <RecentRequestsTable
-                  ebookSidecarEnabled={settingsData?.ebook?.enabled || false}
-                />
-              </Suspense>
+              <RecentRequestsTable
+                ebookSidecarEnabled={settingsData?.ebook?.enabled || false}
+              />
             </div>
 
             {/* Quick Actions */}
