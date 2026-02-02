@@ -52,11 +52,12 @@ export function RequestActionsDropdown({
   const canDelete = true; // Admins can always delete
 
   // View Source: For ebooks, extract MD5 from slow download URL and link to Anna's Archive
-  // For audiobooks, show indexer page URL (not magnet links)
+  // For audiobooks and indexer-sourced ebooks, show indexer page URL (not magnet links)
   let viewSourceUrl: string | null = null;
   if (isEbook && request.torrentUrl) {
-    // torrentUrl for ebooks is JSON array of slow download URLs
-    // Extract MD5 from URL pattern: /slow_download/[md5]/...
+    // torrentUrl for ebooks can be:
+    // 1. JSON array of slow download URLs (Anna's Archive) - extract MD5
+    // 2. Plain URL string (indexer source) - use directly
     try {
       const urls = JSON.parse(request.torrentUrl);
       if (Array.isArray(urls) && urls.length > 0) {
@@ -66,7 +67,11 @@ export function RequestActionsDropdown({
         }
       }
     } catch {
-      // Not JSON, ignore
+      // Not JSON - it's a plain URL from indexer source
+      // Use it directly if it's not a magnet link
+      if (!request.torrentUrl.startsWith('magnet:')) {
+        viewSourceUrl = request.torrentUrl;
+      }
     }
   } else if (request.torrentUrl && !request.torrentUrl.startsWith('magnet:')) {
     viewSourceUrl = request.torrentUrl;
