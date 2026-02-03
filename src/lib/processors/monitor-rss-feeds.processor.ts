@@ -2,7 +2,7 @@
  * Component: Monitor RSS Feeds Processor
  * Documentation: documentation/backend/services/scheduler.md
  *
- * Monitors RSS feeds for new audiobook releases and matches against missing requests
+ * Monitors RSS feeds for new releases and matches against missing requests (audiobooks and ebooks)
  */
 
 import { prisma } from '../db';
@@ -57,7 +57,8 @@ export async function processMonitorRssFeeds(payload: MonitorRssFeedsPayload): P
     return { success: true, message: 'No RSS results', matched: 0 };
   }
 
-  // Get all active requests awaiting search (missing audiobooks)
+  // Get all active requests awaiting search (audiobooks and ebooks)
+  // Both types can be matched against RSS torrent feeds
   const missingRequests = await prisma.request.findMany({
     where: {
       status: 'awaiting_search',
@@ -73,7 +74,7 @@ export async function processMonitorRssFeeds(payload: MonitorRssFeedsPayload): P
     return { success: true, message: 'No missing requests', matched: 0 };
   }
 
-  // Match RSS results against missing audiobooks
+  // Match RSS results against missing requests
   let matched = 0;
   const jobQueue = getJobQueueService();
 
@@ -94,16 +95,27 @@ export async function processMonitorRssFeeds(payload: MonitorRssFeedsPayload): P
       if (hasAuthor && titleMatchCount >= 2) {
         logger.info(`Match found! "${audiobook.title}" by ${audiobook.author} matches torrent: ${torrent.title}`);
 
-        // Trigger search job to process this request
+        // Trigger appropriate search job based on request type
         try {
-          await jobQueue.addSearchJob(request.id, {
-            id: audiobook.id,
-            title: audiobook.title,
-            author: audiobook.author,
-            asin: audiobook.audibleAsin || undefined,
-          });
-          matched++;
-          logger.info(`Triggered search job for request ${request.id}`);
+          if (request.type === 'ebook') {
+            await jobQueue.addSearchEbookJob(request.id, {
+              id: audiobook.id,
+              title: audiobook.title,
+              author: audiobook.author,
+              asin: audiobook.audibleAsin || undefined,
+            });
+            matched++;
+            logger.info(`Triggered ebook search job for request ${request.id}`);
+          } else {
+            await jobQueue.addSearchJob(request.id, {
+              id: audiobook.id,
+              title: audiobook.title,
+              author: audiobook.author,
+              asin: audiobook.audibleAsin || undefined,
+            });
+            matched++;
+            logger.info(`Triggered audiobook search job for request ${request.id}`);
+          }
         } catch (error) {
           logger.error(`Failed to trigger search for request ${request.id}: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }

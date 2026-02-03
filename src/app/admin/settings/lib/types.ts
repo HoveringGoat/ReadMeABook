@@ -103,12 +103,18 @@ export interface PathsSettings {
 
 /**
  * E-book sidecar configuration
+ * Supports two sources: Anna's Archive (direct HTTP) and Indexer Search (Prowlarr)
  */
 export interface EbookSettings {
-  enabled: boolean;
-  preferredFormat: string;
+  // Source toggles
+  annasArchiveEnabled: boolean;
+  indexerSearchEnabled: boolean;
+  // Anna's Archive specific settings
   baseUrl: string;
   flaresolverrUrl: string;
+  // General settings (shared across sources)
+  preferredFormat: string;
+  autoGrabEnabled: boolean;
 }
 
 /**
@@ -143,7 +149,8 @@ export interface IndexerConfig {
   seedingTimeMinutes?: number; // Torrents only
   removeAfterProcessing?: boolean; // Usenet only
   rssEnabled: boolean;
-  categories?: number[];
+  audiobookCategories?: number[]; // Category IDs for audiobook searches (default: [3030])
+  ebookCategories?: number[]; // Category IDs for ebook searches (default: [7020])
   supportsRss?: boolean;
 }
 
@@ -158,7 +165,8 @@ export interface SavedIndexerConfig {
   seedingTimeMinutes?: number; // Torrents only
   removeAfterProcessing?: boolean; // Usenet only
   rssEnabled: boolean;
-  categories: number[];
+  audiobookCategories: number[]; // Category IDs for audiobook searches (default: [3030])
+  ebookCategories: number[]; // Category IDs for ebook searches (default: [7020])
 }
 
 /**

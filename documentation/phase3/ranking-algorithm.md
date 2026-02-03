@@ -1,7 +1,7 @@
 # Intelligent Ranking Algorithm
 
 **Status:** ✅ Implemented | Comprehensive edge case test coverage
-**Tests:** tests/utils/ranking-algorithm.test.ts (73 test cases)
+**Tests:** tests/utils/ranking-algorithm.test.ts (80+ test cases)
 
 Evaluates and scores torrents to automatically select best audiobook download.
 
@@ -19,6 +19,7 @@ Evaluates and scores torrents to automatically select best audiobook download.
 - ✅ **Author presence check (10 tests)**
 - ✅ **Context-aware filtering (3 tests)**
 - ✅ **API compatibility (2 tests)**
+- ✅ **CamelCase and punctuation separator handling (7 tests)**
 
 **Tested edge cases prevent regressions from previous tweaks:**
 - "We Are Legion (We Are Bob)" matching with/without subtitle
@@ -34,6 +35,18 @@ Evaluates and scores torrents to automatically select best audiobook download.
 ## Scoring Criteria (100 points max)
 
 **1. Title/Author Match (60 pts max) - MOST IMPORTANT**
+
+**Pre-Processing: Text Normalization**
+- All titles and author names are normalized before matching
+- **CamelCase splitting:** `"TheCorrespondent"` → `"the correspondent"`
+- **Punctuation to spaces:** `"Twelve.Months-Jim"` → `"twelve months jim"`
+- **Preserves apostrophes:** `"O'Brien"` remains `"o'brien"`
+- Handles common indexer naming patterns (NZB, torrent scene releases)
+
+**Examples of normalization:**
+- `"VirginaEvans TheCorrespondent"` → `"virgina evans the correspondent"`
+- `"Twelve.Months-Jim.Butcher"` → `"twelve months jim butcher"`
+- `"Author_Name-Book.Title.2024"` → `"author name book title 2024"`
 
 **Multi-Stage Matching:**
 
@@ -284,6 +297,80 @@ const ranked = rankTorrents(torrents, audiobook, {
 });
 
 return ranked;  // User can see torrents without author info
+```
+
+## Ebook Torrent Ranking
+
+The ranking algorithm also supports ebook torrents from indexers with ebook-specific scoring.
+
+### Unified Code Architecture
+
+Ebook ranking **reuses** the following from audiobook ranking:
+- `scoreMatch()` - Title/author matching (60 pts)
+- `scoreSeeders()` - Seeder count scoring (15 pts)
+- Bonus modifier system (indexer priority, flag bonuses)
+- Dual threshold filtering (base >= 50, final >= 50)
+
+### Ebook-Specific Scoring
+
+**Format Match (10 pts max)**
+- 10 pts if torrent format matches preferred format
+- 0 pts otherwise (no partial credit)
+- Format detected from torrent title keywords: `.epub`, `.pdf`, `.mobi`, `.azw3`, etc.
+
+**Size Quality (15 pts max, INVERTED)**
+- < 5 MB: 15 pts (optimal for ebooks)
+- 5-15 MB: 10 pts (may have images)
+- 15-20 MB: 5 pts (large but acceptable)
+- > 20 MB: **Filtered out** (too large for ebooks)
+
+### Ebook vs Audiobook Comparison
+
+| Component | Audiobook | Ebook |
+|-----------|-----------|-------|
+| Title/Author | 60 pts (reused) | 60 pts (reused) |
+| Format | 10 pts (M4B > M4A > MP3) | 10 pts (match = 10, else 0) |
+| Size | 15 pts (larger = better) | 15 pts (smaller = better) |
+| Seeders | 15 pts (reused) | 15 pts (reused) |
+| Size Filter | < 20 MB filtered | > 20 MB filtered |
+
+### Ebook Interface
+
+```typescript
+interface EbookTorrentRequest {
+  title: string;
+  author: string;
+  preferredFormat: string;  // 'epub', 'pdf', 'mobi', etc.
+}
+
+interface RankEbookTorrentsOptions {
+  indexerPriorities?: Map<number, number>;
+  flagConfigs?: IndexerFlagConfig[];
+  requireAuthor?: boolean;  // Default: true
+}
+
+function rankEbookTorrents(
+  torrents: TorrentResult[],
+  ebook: EbookTorrentRequest,
+  options?: RankEbookTorrentsOptions
+): RankedEbookTorrent[];
+```
+
+### Ebook Usage Example
+
+```typescript
+// Ebook search from indexers
+const ranked = rankEbookTorrents(prowlarrResults, {
+  title: 'Project Hail Mary',
+  author: 'Andy Weir',
+  preferredFormat: 'epub',
+}, {
+  indexerPriorities,
+  flagConfigs,
+  requireAuthor: true,
+});
+
+const bestEbook = ranked[0];  // Safe to auto-download
 ```
 
 ## Tech Stack

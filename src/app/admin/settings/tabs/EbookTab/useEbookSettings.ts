@@ -77,10 +77,12 @@ export function useEbookSettings({ ebook, onChange, onSuccess, onError, markAsSa
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          enabled: ebook.enabled || false,
+          annasArchiveEnabled: ebook.annasArchiveEnabled || false,
+          indexerSearchEnabled: ebook.indexerSearchEnabled || false,
           format: ebook.preferredFormat || 'epub',
           baseUrl: ebook.baseUrl || 'https://annas-archive.li',
           flaresolverrUrl: ebook.flaresolverrUrl || '',
+          autoGrabEnabled: ebook.autoGrabEnabled ?? true,
         }),
       });
 
@@ -98,6 +100,11 @@ export function useEbookSettings({ ebook, onChange, onSuccess, onError, markAsSa
     }
   };
 
+  /**
+   * Helper to check if any ebook source is enabled
+   */
+  const isAnySourceEnabled = ebook.annasArchiveEnabled || ebook.indexerSearchEnabled;
+
   return {
     saving,
     testingFlaresolverr,
@@ -105,5 +112,6 @@ export function useEbookSettings({ ebook, onChange, onSuccess, onError, markAsSa
     updateEbook,
     testFlaresolverrConnection,
     saveSettings,
+    isAnySourceEnabled,
   };
 }

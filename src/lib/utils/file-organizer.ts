@@ -19,7 +19,6 @@ import {
   checkDiskSpace,
 } from './chapter-merger';
 import { prisma } from '../db';
-import { downloadEbook } from '../services/ebook-scraper';
 import { substituteTemplate, type TemplateVariables } from './path-template.util';
 
 export interface AudiobookMetadata {
@@ -40,6 +39,13 @@ export interface OrganizationResult {
   errors: string[];
   audioFiles: string[];
   coverArtFile?: string;
+}
+
+export interface EbookOrganizationResult {
+  success: boolean;
+  targetPath: string;
+  errors: string[];
+  format?: string;
 }
 
 export interface ValidationResult {
@@ -399,55 +405,10 @@ export class FileOrganizer {
         }
       }
 
-      // E-book sidecar: Download accompanying e-book if enabled
-      try {
-        const ebookConfig = await prisma.configuration.findUnique({
-          where: { key: 'ebook_sidecar_enabled' },
-        });
-
-        const ebookEnabled = ebookConfig?.value === 'true';
-
-        if (ebookEnabled) {
-          await logger?.info(`E-book sidecar enabled, searching for e-book...`);
-
-          // Get configuration
-          const [formatConfig, baseUrlConfig, flaresolverrConfig] = await Promise.all([
-            prisma.configuration.findUnique({ where: { key: 'ebook_sidecar_preferred_format' } }),
-            prisma.configuration.findUnique({ where: { key: 'ebook_sidecar_base_url' } }),
-            prisma.configuration.findUnique({ where: { key: 'ebook_sidecar_flaresolverr_url' } }),
-          ]);
-
-          const preferredFormat = formatConfig?.value || 'epub';
-          const baseUrl = baseUrlConfig?.value || 'https://annas-archive.li';
-          const flaresolverrUrl = flaresolverrConfig?.value || undefined;
-
-          // Download e-book (will try ASIN first, then fall back to title+author)
-          const ebookResult = await downloadEbook(
-            audiobook.asin || '', // ASIN (optional - will fallback to title+author if empty)
-            audiobook.title,
-            audiobook.author,
-            targetPath, // Same directory as audiobook
-            preferredFormat,
-            baseUrl,
-            logger ?? undefined,
-            flaresolverrUrl
-          );
-
-          if (ebookResult.success && ebookResult.filePath) {
-            await logger?.info(`E-book downloaded: ${path.basename(ebookResult.filePath)}`);
-            result.filesMovedCount++;
-          } else {
-            await logger?.warn(`E-book download failed: ${ebookResult.error}`);
-            result.errors.push(`E-book sidecar: ${ebookResult.error}`);
-          }
-        }
-      } catch (error) {
-        await logger?.warn(
-          `E-book sidecar error: ${error instanceof Error ? error.message : 'Unknown error'}`
-        );
-        result.errors.push('E-book sidecar failed');
-        // Don't throw - audiobook organization continues
-      }
+      // NOTE: E-book downloads are now handled via first-class ebook requests
+      // The createEbookRequestIfEnabled() function in organize-files.processor.ts
+      // creates a separate ebook request that goes through the full job queue flow.
+      // This replaces the old inline ebook sidecar download that happened here.
 
       result.targetPath = targetPath;
       result.success = true;
@@ -679,6 +640,166 @@ export class FileOrganizer {
     }
 
     return result;
+  }
+
+  /**
+   * Organize ebook file into proper directory structure
+   * Simplified compared to audiobooks - no metadata tagging, cover art, or chapter merging
+   * Supports both direct file paths (Anna's Archive) and directories (indexer downloads)
+   */
+  async organizeEbook(
+    downloadPath: string,
+    metadata: { title: string; author: string; narrator?: string; asin?: string; year?: number; series?: string; seriesPart?: string },
+    template: string,
+    loggerConfig?: LoggerConfig,
+    isIndexerDownload: boolean = false
+  ): Promise<EbookOrganizationResult> {
+    const logger = loggerConfig ? RMABLogger.forJob(loggerConfig.jobId, loggerConfig.context) : null;
+
+    const result: EbookOrganizationResult = {
+      success: false,
+      targetPath: '',
+      errors: [],
+    };
+
+    try {
+      await logger?.info(`Organizing ebook: ${downloadPath}`);
+
+      const ebookFormats = ['epub', 'pdf', 'mobi', 'azw', 'azw3', 'fb2', 'cbz', 'cbr'];
+
+      // Find ebook file (handle both file and directory cases)
+      const { ebookFile, baseSourcePath, isFile } = await this.findEbookFile(downloadPath, ebookFormats);
+
+      if (!ebookFile) {
+        throw new Error(`No ebook files found in download (looking for: ${ebookFormats.join(', ')})`);
+      }
+
+      // Build full path to source file
+      const sourceFilePath = isFile ? downloadPath : path.join(baseSourcePath, ebookFile);
+      await logger?.info(`Found ebook file: ${ebookFile}`);
+
+      // Detect format from extension
+      const ext = path.extname(ebookFile).toLowerCase().slice(1);
+      result.format = ext;
+      await logger?.info(`Detected ebook format: ${ext}`);
+
+      // Build target directory using same template as audiobooks
+      const targetDir = this.buildTargetPath(
+        this.mediaDir,
+        template,
+        metadata.author,
+        metadata.title,
+        metadata.narrator,
+        metadata.asin,
+        metadata.year,
+        metadata.series,
+        metadata.seriesPart
+      );
+
+      await logger?.info(`Target directory: ${targetDir}`);
+
+      // Create target directory
+      await fs.mkdir(targetDir, { recursive: true });
+
+      // Build target filename (sanitize source filename)
+      const sourceFilename = path.basename(ebookFile);
+      const targetFilename = this.sanitizePath(sourceFilename);
+      const targetPath = path.join(targetDir, targetFilename);
+
+      // Check if target already exists
+      try {
+        await fs.access(targetPath);
+        await logger?.info(`Ebook already exists at target, skipping copy: ${targetFilename}`);
+        result.success = true;
+        result.targetPath = targetDir;
+        return result;
+      } catch {
+        // File doesn't exist, continue with copy
+      }
+
+      // Copy ebook file (do NOT delete original - may need for seeding or retry)
+      await fs.copyFile(sourceFilePath, targetPath);
+      await fs.chmod(targetPath, 0o644);
+
+      await logger?.info(`Copied ebook: ${targetFilename}`);
+
+      // Clean up source file ONLY for direct HTTP downloads (not indexer downloads which need to seed)
+      if (!isIndexerDownload && isFile) {
+        try {
+          await fs.unlink(sourceFilePath);
+          await logger?.info(`Cleaned up source file: ${sourceFilename}`);
+        } catch {
+          // Ignore cleanup errors
+        }
+      } else if (isIndexerDownload) {
+        await logger?.info(`Keeping source file for seeding: ${sourceFilename}`);
+      }
+
+      result.success = true;
+      result.targetPath = targetDir;
+
+      await logger?.info(`Ebook organization complete: ${targetFilename}`);
+
+      return result;
+    } catch (error) {
+      await logger?.error(`Ebook organization failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      result.errors.push(error instanceof Error ? error.message : 'Unknown error');
+      return result;
+    }
+  }
+
+  /**
+   * Find ebook file in download path (handles both single file and directory)
+   */
+  private async findEbookFile(
+    downloadPath: string,
+    ebookFormats: string[]
+  ): Promise<{ ebookFile: string | null; baseSourcePath: string; isFile: boolean }> {
+    let ebookFile: string | null = null;
+    let isFile = false;
+
+    try {
+      const stats = await fs.stat(downloadPath);
+
+      if (stats.isFile()) {
+        // Handle single file case
+        isFile = true;
+        const ext = path.extname(downloadPath).toLowerCase().slice(1);
+
+        if (ebookFormats.includes(ext)) {
+          ebookFile = path.basename(downloadPath);
+        }
+      } else {
+        // Handle directory case - find ebook files inside
+        const files = await this.walkDirectory(downloadPath);
+
+        // Filter to ebook files and sort by preference (epub > pdf > others)
+        const ebookFiles = files.filter(file => {
+          const ext = path.extname(file).toLowerCase().slice(1);
+          return ebookFormats.includes(ext);
+        });
+
+        if (ebookFiles.length > 0) {
+          // Sort by format preference
+          ebookFiles.sort((a, b) => {
+            const extA = path.extname(a).toLowerCase().slice(1);
+            const extB = path.extname(b).toLowerCase().slice(1);
+            const priorityOrder = ['epub', 'pdf', 'mobi', 'azw3', 'azw', 'fb2', 'cbz', 'cbr'];
+            return priorityOrder.indexOf(extA) - priorityOrder.indexOf(extB);
+          });
+
+          ebookFile = ebookFiles[0];
+        }
+      }
+    } catch {
+      // Path doesn't exist or inaccessible
+    }
+
+    return {
+      ebookFile,
+      baseSourcePath: downloadPath,
+      isFile,
+    };
   }
 }
 

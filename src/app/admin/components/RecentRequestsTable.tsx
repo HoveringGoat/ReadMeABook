@@ -19,6 +19,7 @@ interface RecentRequest {
   title: string;
   author: string;
   status: string;
+  type?: 'audiobook' | 'ebook';
   userId: string;
   user: string;
   createdAt: Date;
@@ -557,7 +558,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false }: RecentReque
                     onClick={() => handleSort('title')}
                   >
                     <div className="flex items-center gap-2">
-                      Audiobook
+                      Request
                       <SortIcon field="title" currentSort={sortBy} currentOrder={sortOrder} />
                     </div>
                   </th>
@@ -610,8 +611,21 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false }: RecentReque
                   >
                     <td className="px-6 py-4">
                       <div>
-                        <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                          {request.title}
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                            {request.title}
+                          </span>
+                          {request.type === 'ebook' && (
+                            <span
+                              className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full"
+                              style={{ backgroundColor: '#f16f1920', color: '#f16f19' }}
+                            >
+                              <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                <path d="M9 4.804A7.968 7.968 0 005.5 4c-1.255 0-2.443.29-3.5.804v10A7.969 7.969 0 015.5 14c1.669 0 3.218.51 4.5 1.385A7.962 7.962 0 0114.5 14c1.255 0 2.443.29 3.5.804v-10A7.968 7.968 0 0014.5 4c-1.255 0-2.443.29-3.5.804V12a1 1 0 11-2 0V4.804z" />
+                              </svg>
+                              Ebook
+                            </span>
+                          )}
                         </div>
                         <div className="text-sm text-gray-500 dark:text-gray-400">
                           {request.author}
@@ -644,6 +658,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false }: RecentReque
                           title: request.title,
                           author: request.author,
                           status: request.status,
+                          type: request.type,
                           torrentUrl: request.torrentUrl,
                         }}
                         onDelete={handleDeleteClick}

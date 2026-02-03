@@ -18,6 +18,7 @@ export interface RequestActionsDropdownProps {
     title: string;
     author: string;
     status: string;
+    type?: 'audiobook' | 'ebook';
     torrentUrl?: string | null;
   };
   onDelete: (requestId: string, title: string) => void;
@@ -39,17 +40,49 @@ export function RequestActionsDropdown({
 }: RequestActionsDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [showInteractiveSearch, setShowInteractiveSearch] = useState(false);
+  const [showInteractiveSearchEbook, setShowInteractiveSearchEbook] = useState(false);
   const { containerRef, dropdownRef, positionAbove, style } = useSmartDropdownPosition(isOpen);
 
-  // Determine available actions based on status
-  const canSearch = ['pending', 'failed', 'awaiting_search'].includes(request.status);
+  // Determine request type
+  const isEbook = request.type === 'ebook';
+
+  // Determine available actions based on status and type
+  // Ebooks don't support manual/interactive search (Anna's Archive only)
+  const canSearch = !isEbook && ['pending', 'failed', 'awaiting_search'].includes(request.status);
   const canCancel = ['pending', 'searching', 'downloading'].includes(request.status);
   const canDelete = true; // Admins can always delete
-  // Only show "View Source" if we have a valid indexer page URL (not a magnet link)
-  const canViewSource = !!request.torrentUrl &&
-    !request.torrentUrl.startsWith('magnet:') &&
+
+  // View Source: For ebooks, extract MD5 from slow download URL and link to Anna's Archive
+  // For audiobooks and indexer-sourced ebooks, show indexer page URL (not magnet links)
+  let viewSourceUrl: string | null = null;
+  if (isEbook && request.torrentUrl) {
+    // torrentUrl for ebooks can be:
+    // 1. JSON array of slow download URLs (Anna's Archive) - extract MD5
+    // 2. Plain URL string (indexer source) - use directly
+    try {
+      const urls = JSON.parse(request.torrentUrl);
+      if (Array.isArray(urls) && urls.length > 0) {
+        const md5Match = urls[0].match(/\/slow_download\/([a-f0-9]{32})\//i);
+        if (md5Match) {
+          viewSourceUrl = `https://annas-archive.li/md5/${md5Match[1]}`;
+        }
+      }
+    } catch {
+      // Not JSON - it's a plain URL from indexer source
+      // Use it directly if it's not a magnet link
+      if (!request.torrentUrl.startsWith('magnet:')) {
+        viewSourceUrl = request.torrentUrl;
+      }
+    }
+  } else if (request.torrentUrl && !request.torrentUrl.startsWith('magnet:')) {
+    viewSourceUrl = request.torrentUrl;
+  }
+
+  const canViewSource = !!viewSourceUrl &&
     ['downloading', 'processing', 'downloaded', 'available'].includes(request.status);
-  const canFetchEbook = ebookSidecarEnabled && ['downloaded', 'available'].includes(request.status);
+
+  // Ebook actions (Grab Ebook, Interactive Search Ebook) only for audiobook requests
+  const canFetchEbook = !isEbook && ebookSidecarEnabled && ['downloaded', 'available'].includes(request.status);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -80,6 +113,11 @@ export function RequestActionsDropdown({
   const handleInteractiveSearch = () => {
     setIsOpen(false);
     setShowInteractiveSearch(true);
+  };
+
+  const handleInteractiveSearchEbook = () => {
+    setIsOpen(false);
+    setShowInteractiveSearchEbook(true);
   };
 
   const handleCancel = async () => {
@@ -166,9 +204,9 @@ export function RequestActionsDropdown({
             )}
 
             {/* View Source */}
-            {canViewSource && (
+            {canViewSource && viewSourceUrl && (
               <a
-                href={request.torrentUrl!}
+                href={viewSourceUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 onClick={() => setIsOpen(false)}
@@ -192,7 +230,7 @@ export function RequestActionsDropdown({
               </a>
             )}
 
-            {/* Fetch E-book */}
+            {/* Grab E-book (automatic) */}
             {canFetchEbook && (
               <button
                 onClick={handleFetchEbook}
@@ -212,7 +250,31 @@ export function RequestActionsDropdown({
                     d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
                   />
                 </svg>
-                Try to fetch Ebook
+                Grab Ebook
+              </button>
+            )}
+
+            {/* Interactive Search E-book */}
+            {canFetchEbook && (
+              <button
+                onClick={handleInteractiveSearchEbook}
+                className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 transition-colors"
+                role="menuitem"
+              >
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"
+                  />
+                </svg>
+                Interactive Search Ebook
               </button>
             )}
 
@@ -300,7 +362,7 @@ export function RequestActionsDropdown({
       {/* Dropdown menu (rendered via portal) */}
       {typeof window !== 'undefined' && dropdownMenu && createPortal(dropdownMenu, document.body)}
 
-      {/* Interactive Search Modal */}
+      {/* Interactive Search Modal (Audiobook) */}
       <InteractiveTorrentSearchModal
         isOpen={showInteractiveSearch}
         onClose={() => setShowInteractiveSearch(false)}
@@ -309,6 +371,18 @@ export function RequestActionsDropdown({
           title: request.title,
           author: request.author,
         }}
+      />
+
+      {/* Interactive Search Modal (Ebook) */}
+      <InteractiveTorrentSearchModal
+        isOpen={showInteractiveSearchEbook}
+        onClose={() => setShowInteractiveSearchEbook(false)}
+        requestId={request.requestId}
+        audiobook={{
+          title: request.title,
+          author: request.author,
+        }}
+        searchMode="ebook"
       />
     </>
   );
