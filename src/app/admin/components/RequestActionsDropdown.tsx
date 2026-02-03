@@ -40,6 +40,7 @@ export function RequestActionsDropdown({
 }: RequestActionsDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [showInteractiveSearch, setShowInteractiveSearch] = useState(false);
+  const [showInteractiveSearchEbook, setShowInteractiveSearchEbook] = useState(false);
   const { containerRef, dropdownRef, positionAbove, style } = useSmartDropdownPosition(isOpen);
 
   // Determine request type
@@ -80,7 +81,7 @@ export function RequestActionsDropdown({
   const canViewSource = !!viewSourceUrl &&
     ['downloading', 'processing', 'downloaded', 'available'].includes(request.status);
 
-  // "Try to fetch Ebook" only for audiobook requests
+  // Ebook actions (Grab Ebook, Interactive Search Ebook) only for audiobook requests
   const canFetchEbook = !isEbook && ebookSidecarEnabled && ['downloaded', 'available'].includes(request.status);
 
   // Close dropdown when clicking outside
@@ -112,6 +113,11 @@ export function RequestActionsDropdown({
   const handleInteractiveSearch = () => {
     setIsOpen(false);
     setShowInteractiveSearch(true);
+  };
+
+  const handleInteractiveSearchEbook = () => {
+    setIsOpen(false);
+    setShowInteractiveSearchEbook(true);
   };
 
   const handleCancel = async () => {
@@ -224,7 +230,7 @@ export function RequestActionsDropdown({
               </a>
             )}
 
-            {/* Fetch E-book */}
+            {/* Grab E-book (automatic) */}
             {canFetchEbook && (
               <button
                 onClick={handleFetchEbook}
@@ -244,7 +250,31 @@ export function RequestActionsDropdown({
                     d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
                   />
                 </svg>
-                Try to fetch Ebook
+                Grab Ebook
+              </button>
+            )}
+
+            {/* Interactive Search E-book */}
+            {canFetchEbook && (
+              <button
+                onClick={handleInteractiveSearchEbook}
+                className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 transition-colors"
+                role="menuitem"
+              >
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"
+                  />
+                </svg>
+                Interactive Search Ebook
               </button>
             )}
 
@@ -332,7 +362,7 @@ export function RequestActionsDropdown({
       {/* Dropdown menu (rendered via portal) */}
       {typeof window !== 'undefined' && dropdownMenu && createPortal(dropdownMenu, document.body)}
 
-      {/* Interactive Search Modal */}
+      {/* Interactive Search Modal (Audiobook) */}
       <InteractiveTorrentSearchModal
         isOpen={showInteractiveSearch}
         onClose={() => setShowInteractiveSearch(false)}
@@ -341,6 +371,18 @@ export function RequestActionsDropdown({
           title: request.title,
           author: request.author,
         }}
+      />
+
+      {/* Interactive Search Modal (Ebook) */}
+      <InteractiveTorrentSearchModal
+        isOpen={showInteractiveSearchEbook}
+        onClose={() => setShowInteractiveSearchEbook(false)}
+        requestId={request.requestId}
+        audiobook={{
+          title: request.title,
+          author: request.author,
+        }}
+        searchMode="ebook"
       />
     </>
   );

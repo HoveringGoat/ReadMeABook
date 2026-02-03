@@ -397,3 +397,88 @@ export function useRequestWithTorrent() {
 
   return { requestWithTorrent, isLoading, error };
 }
+
+export function useInteractiveSearchEbook() {
+  const { accessToken } = useAuth();
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const searchEbooks = async (requestId: string, customTitle?: string) => {
+    if (!accessToken) {
+      throw new Error('Not authenticated');
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetchWithAuth(`/api/requests/${requestId}/interactive-search-ebook`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: customTitle ? JSON.stringify({ customTitle }) : undefined,
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || data.message || 'Failed to search for ebooks');
+      }
+
+      return data.results || [];
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      setError(message);
+      throw err;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return { searchEbooks, isLoading, error };
+}
+
+export function useSelectEbook() {
+  const { accessToken } = useAuth();
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const selectEbook = async (requestId: string, ebook: any) => {
+    if (!accessToken) {
+      throw new Error('Not authenticated');
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetchWithAuth(`/api/requests/${requestId}/select-ebook`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ ebook }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || data.message || 'Failed to download ebook');
+      }
+
+      // Revalidate requests
+      mutate((key) => typeof key === 'string' && key.includes('/api/requests'));
+
+      return data;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      setError(message);
+      throw err;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return { selectEbook, isLoading, error };
+}

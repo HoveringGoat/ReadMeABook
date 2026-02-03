@@ -231,6 +231,29 @@ export function EbookTab({ ebook, onChange, onSuccess, onError, markAsSaved }: E
                 EPUB is recommended for most e-readers. "Any format" accepts the first available.
               </p>
             </div>
+
+            {/* Auto Grab Toggle */}
+            <div className="flex items-start gap-4 pt-2">
+              <input
+                type="checkbox"
+                id="auto-grab-enabled"
+                checked={ebook.autoGrabEnabled ?? true}
+                onChange={(e) => updateEbook('autoGrabEnabled', e.target.checked)}
+                className="mt-1 h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              <div className="flex-1">
+                <label
+                  htmlFor="auto-grab-enabled"
+                  className="block text-sm font-medium text-gray-900 dark:text-gray-100 cursor-pointer"
+                >
+                  Automatically fetch ebooks
+                </label>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                  When enabled, ebook requests are created automatically after audiobook downloads complete.
+                  When disabled, use the "Fetch Ebook" button on completed requests.
+                </p>
+              </div>
+            </div>
           </div>
         </div>
       )}

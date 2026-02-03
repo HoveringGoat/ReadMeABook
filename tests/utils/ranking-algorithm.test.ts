@@ -1034,6 +1034,159 @@ describe('ranking-algorithm', () => {
     });
   });
 
+  describe('Initial Variations (J.N. vs J N)', () => {
+    const algorithm = new RankingAlgorithm();
+
+    it('matches "J.N. Chaney" to torrent with "J N Chaney" in automatic mode', () => {
+      const torrent = {
+        ...baseTorrent,
+        title: 'Infinite Crown by Terry Maggert, J N Chaney [ENG / M4B]',
+      };
+
+      const breakdown = algorithm.getScoreBreakdown(torrent, {
+        title: 'Infinite Crown',
+        author: 'J.N. Chaney',
+      }, true);  // requireAuthor: true (automatic mode)
+
+      // "J.N. Chaney" should normalize to "j n chaney"
+      // Torrent title should normalize to include "j n chaney"
+      // Author check should PASS
+      expect(breakdown.matchScore).toBeGreaterThan(0);
+      expect(breakdown.totalScore).toBeGreaterThanOrEqual(50);
+    });
+
+    it('matches author with periods to space-separated initials', () => {
+      const torrent = {
+        ...baseTorrent,
+        title: 'Book Title by J K Rowling [M4B]',
+      };
+
+      const breakdown = algorithm.getScoreBreakdown(torrent, {
+        title: 'Book Title',
+        author: 'J.K. Rowling',
+      }, true);
+
+      expect(breakdown.matchScore).toBeGreaterThan(0);
+    });
+  });
+
+  describe('CamelCase and Punctuation Separator Handling', () => {
+    const algorithm = new RankingAlgorithm();
+
+    it('matches CamelCase torrent title "VirginaEvans TheCorrespondent" to "The Correspondent" by "Virginia Evans"', () => {
+      const torrent = {
+        ...baseTorrent,
+        title: 'VirginaEvans TheCorrespondent',
+      };
+
+      const breakdown = algorithm.getScoreBreakdown(torrent, {
+        title: 'The Correspondent',
+        author: 'Virginia Evans',
+      }, false);  // requireAuthor: false - source has typo "Virgina" vs "Virginia"
+
+      // Should match after CamelCase normalization
+      // "VirginaEvans TheCorrespondent" → "virgina evans the correspondent"
+      // "The Correspondent" → "the correspondent" → required words: ["correspondent"]
+      // Coverage: "correspondent" found → passes
+      // Note: Author has typo in source data ("Virgina" vs "Virginia"), so fuzzy matching gives partial credit
+      expect(breakdown.matchScore).toBeGreaterThan(35);
+    });
+
+    it('matches period-separated title "Twelve.Months-Jim.Butcher" to "Twelve Months" by "Jim Butcher"', () => {
+      const torrent = {
+        ...baseTorrent,
+        title: 'Twelve.Months-Jim.Butcher',
+      };
+
+      const breakdown = algorithm.getScoreBreakdown(torrent, {
+        title: 'Twelve Months',
+        author: 'Jim Butcher',
+      });
+
+      // Should match after punctuation normalization
+      // "Twelve.Months-Jim.Butcher" → "twelve months jim butcher"
+      // Full title match + author match
+      expect(breakdown.matchScore).toBeGreaterThan(55);
+    });
+
+    it('matches mixed CamelCase and punctuation "AuthorName-BookTitle.2024"', () => {
+      const torrent = {
+        ...baseTorrent,
+        title: 'JohnSmith-GreatBook.2024',
+      };
+
+      const breakdown = algorithm.getScoreBreakdown(torrent, {
+        title: 'Great Book',
+        author: 'John Smith',
+      });
+
+      // "JohnSmith-GreatBook.2024" → "john smith great book 2024"
+      // Gets good fuzzy match score (title words present, author present)
+      expect(breakdown.matchScore).toBeGreaterThan(35);
+    });
+
+    it('matches CamelCase author with no separator "AuthorNameBookTitle"', () => {
+      const torrent = {
+        ...baseTorrent,
+        title: 'BrandonSandersonMistborn',
+      };
+
+      const breakdown = algorithm.getScoreBreakdown(torrent, {
+        title: 'Mistborn',
+        author: 'Brandon Sanderson',
+      });
+
+      // "BrandonSandersonMistborn" → "brandon sanderson mistborn"
+      expect(breakdown.matchScore).toBeGreaterThan(50);
+    });
+
+    it('handles underscore separators "Author_Name_Book_Title"', () => {
+      const torrent = {
+        ...baseTorrent,
+        title: 'Jane_Doe_Amazing_Story',
+      };
+
+      const breakdown = algorithm.getScoreBreakdown(torrent, {
+        title: 'Amazing Story',
+        author: 'Jane Doe',
+      });
+
+      // "Jane_Doe_Amazing_Story" → "jane doe amazing story"
+      expect(breakdown.matchScore).toBeGreaterThan(50);
+    });
+
+    it('preserves apostrophes in names like "O\'Brien"', () => {
+      const torrent = {
+        ...baseTorrent,
+        title: "Tim O'Brien - The Things They Carried",
+      };
+
+      const breakdown = algorithm.getScoreBreakdown(torrent, {
+        title: 'The Things They Carried',
+        author: "Tim O'Brien",
+      });
+
+      // Apostrophe should be preserved
+      expect(breakdown.matchScore).toBeGreaterThan(50);
+    });
+
+    it('handles real-world NZB title format with periods', () => {
+      const torrent = {
+        ...baseTorrent,
+        title: 'William.L.Shirer-Berlin.Diary-AUDIOBOOK-96kbs',
+      };
+
+      const breakdown = algorithm.getScoreBreakdown(torrent, {
+        title: 'Berlin Diary',
+        author: 'William L. Shirer',
+      });
+
+      // "William.L.Shirer-Berlin.Diary-AUDIOBOOK-96kbs" → "william l shirer berlin diary audiobook 96kbs"
+      // Gets partial score from fuzzy matching (title words + author words present)
+      expect(breakdown.matchScore).toBeGreaterThan(30);
+    });
+  });
+
   describe('Legacy API Compatibility', () => {
     it('supports legacy rankTorrents signature with separate parameters', () => {
       const torrent = {

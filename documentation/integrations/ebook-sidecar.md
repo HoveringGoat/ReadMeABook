@@ -65,6 +65,9 @@ Ebooks are first-class citizens in RMAB, with their own request type, tracking, 
 | Key | Default | Options | Description |
 |-----|---------|---------|-------------|
 | `ebook_sidecar_preferred_format` | `epub` | `epub, pdf, mobi, azw3, any` | Preferred format |
+| `ebook_auto_grab_enabled` | `true` | `true, false` | Auto-create ebook requests after audiobook downloads |
+
+*Note: Auto-grab is automatically disabled if no ebook sources are enabled. Manual fetch via admin buttons still works.*
 
 ## Database Schema
 

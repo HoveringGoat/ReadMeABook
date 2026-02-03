@@ -82,6 +82,7 @@ export function useEbookSettings({ ebook, onChange, onSuccess, onError, markAsSa
           format: ebook.preferredFormat || 'epub',
           baseUrl: ebook.baseUrl || 'https://annas-archive.li',
           flaresolverrUrl: ebook.flaresolverrUrl || '',
+          autoGrabEnabled: ebook.autoGrabEnabled ?? true,
         }),
       });
 

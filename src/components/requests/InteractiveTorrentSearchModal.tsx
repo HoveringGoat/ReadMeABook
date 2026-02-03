@@ -1,6 +1,10 @@
 /**
  * Component: Interactive Torrent Search Modal
  * Documentation: documentation/phase3/prowlarr.md
+ *
+ * Supports two search modes:
+ * - audiobook: Search for audiobook torrents/NZBs (default)
+ * - ebook: Search for ebooks from Anna's Archive + indexers
  */
 
 'use client';
@@ -10,7 +14,14 @@ import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { TorrentResult, RankedTorrent } from '@/lib/utils/ranking-algorithm';
-import { useInteractiveSearch, useSelectTorrent, useSearchTorrents, useRequestWithTorrent } from '@/lib/hooks/useRequests';
+import {
+  useInteractiveSearch,
+  useSelectTorrent,
+  useSearchTorrents,
+  useRequestWithTorrent,
+  useInteractiveSearchEbook,
+  useSelectEbook,
+} from '@/lib/hooks/useRequests';
 import { Audiobook } from '@/lib/hooks/useAudiobooks';
 
 interface InteractiveTorrentSearchModalProps {
@@ -23,6 +34,7 @@ interface InteractiveTorrentSearchModalProps {
   };
   fullAudiobook?: Audiobook; // Optional - only provided when called from details modal
   onSuccess?: () => void;
+  searchMode?: 'audiobook' | 'ebook'; // Search mode - defaults to audiobook
 }
 
 export function InteractiveTorrentSearchModal({
@@ -32,8 +44,9 @@ export function InteractiveTorrentSearchModal({
   audiobook,
   fullAudiobook,
   onSuccess,
+  searchMode = 'audiobook',
 }: InteractiveTorrentSearchModalProps) {
-  // Hooks for existing request flow
+  // Hooks for existing audiobook request flow
   const { searchTorrents: searchByRequestId, isLoading: isSearchingByRequest, error: searchByRequestError } = useInteractiveSearch();
   const { selectTorrent, isLoading: isSelectingTorrent, error: selectTorrentError } = useSelectTorrent();
 
@@ -41,17 +54,30 @@ export function InteractiveTorrentSearchModal({
   const { searchTorrents: searchByAudiobook, isLoading: isSearchingByAudiobook, error: searchByAudiobookError } = useSearchTorrents();
   const { requestWithTorrent, isLoading: isRequestingWithTorrent, error: requestWithTorrentError } = useRequestWithTorrent();
 
-  const [results, setResults] = useState<(RankedTorrent & { qualityScore?: number })[]>([]);
+  // Hooks for ebook flow
+  const { searchEbooks, isLoading: isSearchingEbooks, error: searchEbooksError } = useInteractiveSearchEbook();
+  const { selectEbook, isLoading: isSelectingEbook, error: selectEbookError } = useSelectEbook();
+
+  const [results, setResults] = useState<(RankedTorrent & { qualityScore?: number; source?: string })[]>([]);
   const [confirmTorrent, setConfirmTorrent] = useState<TorrentResult | null>(null);
   const [searchTitle, setSearchTitle] = useState(audiobook.title);
 
   // Determine which mode we're in
+  const isEbookMode = searchMode === 'ebook';
   const hasRequestId = !!requestId;
-  const isSearching = hasRequestId ? isSearchingByRequest : isSearchingByAudiobook;
-  const isDownloading = hasRequestId ? isSelectingTorrent : isRequestingWithTorrent;
-  const error = hasRequestId
-    ? (searchByRequestError || selectTorrentError)
-    : (searchByAudiobookError || requestWithTorrentError);
+
+  // Loading/error state based on mode
+  const isSearching = isEbookMode
+    ? isSearchingEbooks
+    : (hasRequestId ? isSearchingByRequest : isSearchingByAudiobook);
+  const isDownloading = isEbookMode
+    ? isSelectingEbook
+    : (hasRequestId ? isSelectingTorrent : isRequestingWithTorrent);
+  const error = isEbookMode
+    ? (searchEbooksError || selectEbookError)
+    : (hasRequestId
+        ? (searchByRequestError || selectTorrentError)
+        : (searchByAudiobookError || requestWithTorrentError));
 
   // Reset search title when modal opens/closes or audiobook changes
   React.useEffect(() => {
@@ -72,12 +98,20 @@ export function InteractiveTorrentSearchModal({
 
     try {
       let data;
-      if (hasRequestId) {
-        // Existing flow: search by requestId with optional custom title
+      if (isEbookMode) {
+        // Ebook mode: search Anna's Archive + indexers
+        if (!requestId) {
+          console.error('Ebook search requires a requestId');
+          return;
+        }
+        const customTitle = searchTitle !== audiobook.title ? searchTitle : undefined;
+        data = await searchEbooks(requestId, customTitle);
+      } else if (hasRequestId) {
+        // Existing audiobook flow: search by requestId with optional custom title
         const customTitle = searchTitle !== audiobook.title ? searchTitle : undefined;
         data = await searchByRequestId(requestId, customTitle);
       } else {
-        // New flow: search by custom title + original author + optional ASIN for size scoring
+        // New audiobook flow: search by custom title + original author + optional ASIN for size scoring
         const asin = fullAudiobook?.asin;
         data = await searchByAudiobook(searchTitle, audiobook.author, asin);
       }
@@ -102,11 +136,17 @@ export function InteractiveTorrentSearchModal({
     if (!confirmTorrent) return;
 
     try {
-      if (hasRequestId) {
-        // Existing flow: select torrent for existing request
+      if (isEbookMode) {
+        // Ebook flow: select ebook for existing audiobook request
+        if (!requestId) {
+          throw new Error('Request ID required for ebook selection');
+        }
+        await selectEbook(requestId, confirmTorrent);
+      } else if (hasRequestId) {
+        // Existing audiobook flow: select torrent for existing request
         await selectTorrent(requestId, confirmTorrent);
       } else {
-        // New flow: create request with torrent
+        // New audiobook flow: create request with torrent
         if (!fullAudiobook) {
           throw new Error('Audiobook data required to create request');
         }
@@ -120,7 +160,7 @@ export function InteractiveTorrentSearchModal({
       // Request list will auto-refresh via SWR
     } catch (err) {
       // Error already handled by hook
-      console.error('Failed to download torrent:', err);
+      console.error('Failed to download:', err);
       setConfirmTorrent(null);
     }
   };
@@ -138,14 +178,26 @@ export function InteractiveTorrentSearchModal({
     return 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200';
   };
 
+  // UI text based on mode
+  const modalTitle = isEbookMode ? 'Select Ebook Source' : 'Select Torrent';
+  const searchLabel = isEbookMode ? 'Search Title' : 'Search Title';
+  const searchPlaceholder = isEbookMode ? 'Enter book title to search...' : 'Enter book title to search...';
+  const loadingText = isEbookMode ? 'Searching for ebooks...' : 'Searching for torrents...';
+  const noResultsText = isEbookMode ? 'No ebooks found' : 'No torrents/nzbs found';
+  const resultCountText = (count: number) =>
+    isEbookMode
+      ? `Found ${count} ebook${count !== 1 ? 's' : ''}`
+      : `Found ${count} torrent${count !== 1 ? 's' : ''}`;
+  const confirmTitle = isEbookMode ? 'Download Ebook' : 'Download Torrent';
+
   return (
     <>
-      <Modal isOpen={isOpen} onClose={onClose} title="Select Torrent" size="full">
+      <Modal isOpen={isOpen} onClose={onClose} title={modalTitle} size="full">
         <div className="space-y-4">
           {/* Search customization - editable for ALL modes */}
           <div className="bg-gray-50 dark:bg-gray-900 p-4 rounded-lg">
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-              Search Title
+              {searchLabel}
             </label>
             <div className="flex gap-2">
               <input
@@ -153,7 +205,7 @@ export function InteractiveTorrentSearchModal({
                 value={searchTitle}
                 onChange={(e) => setSearchTitle(e.target.value)}
                 onKeyPress={handleSearchKeyPress}
-                placeholder="Enter book title to search..."
+                placeholder={searchPlaceholder}
                 disabled={isSearching}
                 className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 disabled:opacity-50"
               />
@@ -180,14 +232,14 @@ export function InteractiveTorrentSearchModal({
           {isSearching && (
             <div className="flex items-center justify-center py-12">
               <div className="animate-spin w-8 h-8 border-4 border-gray-300 border-t-blue-600 rounded-full"></div>
-              <span className="ml-3 text-gray-600 dark:text-gray-400">Searching for torrents...</span>
+              <span className="ml-3 text-gray-600 dark:text-gray-400">{loadingText}</span>
             </div>
           )}
 
           {/* No results */}
           {!isSearching && results.length === 0 && (
             <div className="text-center py-12">
-              <p className="text-gray-500 dark:text-gray-400">No torrents/nzbs found</p>
+              <p className="text-gray-500 dark:text-gray-400">{noResultsText}</p>
               <Button onClick={performSearch} variant="outline" className="mt-4">
                 Try Again
               </Button>
@@ -220,7 +272,7 @@ export function InteractiveTorrentSearchModal({
                         Seeds
                       </th>
                       <th className="px-2 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase hidden lg:table-cell w-32">
-                        Indexer
+                        {isEbookMode ? 'Source' : 'Indexer'}
                       </th>
                       <th className="px-2 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase w-24">
                         Action
@@ -246,21 +298,30 @@ export function InteractiveTorrentSearchModal({
                             </a>
                           </div>
                           <div className="flex gap-2 mt-1 flex-wrap">
+                            {/* Anna's Archive badge for ebook mode */}
+                            {isEbookMode && result.source === 'annas_archive' && (
+                              <span className="inline-block px-2 py-0.5 text-xs bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200 rounded font-medium">
+                                Anna's Archive
+                              </span>
+                            )}
                             {result.format && (
-                              <span className="inline-block px-2 py-0.5 text-xs bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200 rounded">
+                              <span className="inline-block px-2 py-0.5 text-xs bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200 rounded uppercase">
                                 {result.format}
                               </span>
                             )}
                             <span className="sm:hidden inline-block px-2 py-0.5 text-xs bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400 rounded">
-                              {formatSize(result.size)}
+                              {result.size > 0 ? formatSize(result.size) : 'Unknown'}
                             </span>
-                            <span className="md:hidden inline-block px-2 py-0.5 text-xs bg-green-100 text-green-600 dark:bg-green-900 dark:text-green-400 rounded">
-                              {result.seeders} seeds
-                            </span>
+                            {/* Hide seeds badge for Anna's Archive results */}
+                            {!(isEbookMode && result.source === 'annas_archive') && (
+                              <span className="md:hidden inline-block px-2 py-0.5 text-xs bg-green-100 text-green-600 dark:bg-green-900 dark:text-green-400 rounded">
+                                {result.seeders} seeds
+                              </span>
+                            )}
                           </div>
                         </td>
                         <td className="px-2 py-3 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400 hidden sm:table-cell">
-                          {formatSize(result.size)}
+                          {result.size > 0 ? formatSize(result.size) : '—'}
                         </td>
                         <td className="px-2 py-3 whitespace-nowrap text-sm">
                           <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${getQualityBadgeColor(Math.round(result.score))}`}>
@@ -271,15 +332,23 @@ export function InteractiveTorrentSearchModal({
                           {result.bonusPoints > 0 ? `+${Math.round(result.bonusPoints)}` : '—'}
                         </td>
                         <td className="px-2 py-3 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400 hidden md:table-cell">
-                          <span className="flex items-center gap-1">
-                            <svg className="w-3 h-3 text-green-500" fill="currentColor" viewBox="0 0 20 20">
-                              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v3.586L7.707 9.293a1 1 0 00-1.414 1.414l3 3a1 1 0 001.414 0l3-3a1 1 0 00-1.414-1.414L11 10.586V7z" clipRule="evenodd" />
-                            </svg>
-                            {result.seeders}
-                          </span>
+                          {isEbookMode && result.source === 'annas_archive' ? (
+                            <span className="text-gray-400">N/A</span>
+                          ) : (
+                            <span className="flex items-center gap-1">
+                              <svg className="w-3 h-3 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+                                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v3.586L7.707 9.293a1 1 0 00-1.414 1.414l3 3a1 1 0 001.414 0l3-3a1 1 0 00-1.414-1.414L11 10.586V7z" clipRule="evenodd" />
+                              </svg>
+                              {result.seeders}
+                            </span>
+                          )}
                         </td>
                         <td className="px-2 py-3 whitespace-nowrap text-xs text-gray-500 dark:text-gray-400 hidden lg:table-cell">
-                          {result.indexer}
+                          {isEbookMode && result.source === 'annas_archive' ? (
+                            <span className="text-orange-600 dark:text-orange-400 font-medium">Anna's Archive</span>
+                          ) : (
+                            result.indexer
+                          )}
                         </td>
                         <td className="px-2 py-3 whitespace-nowrap text-right text-sm">
                           <Button
@@ -303,7 +372,7 @@ export function InteractiveTorrentSearchModal({
           {!isSearching && results.length > 0 && (
             <div className="flex items-center justify-between pt-4 border-t border-gray-200 dark:border-gray-700">
               <p className="text-sm text-gray-600 dark:text-gray-400">
-                Found {results.length} torrent{results.length !== 1 ? 's' : ''}
+                {resultCountText(results.length)}
               </p>
               <Button onClick={performSearch} variant="outline" size="sm">
                 Refresh Results
@@ -318,7 +387,7 @@ export function InteractiveTorrentSearchModal({
         isOpen={!!confirmTorrent}
         onClose={() => setConfirmTorrent(null)}
         onConfirm={handleConfirmDownload}
-        title="Download Torrent"
+        title={confirmTitle}
         message={`Download "${confirmTorrent?.title}"?`}
         confirmText="Download"
         isLoading={isDownloading}

@@ -1,7 +1,7 @@
 # Intelligent Ranking Algorithm
 
 **Status:** ✅ Implemented | Comprehensive edge case test coverage
-**Tests:** tests/utils/ranking-algorithm.test.ts (73 test cases)
+**Tests:** tests/utils/ranking-algorithm.test.ts (80+ test cases)
 
 Evaluates and scores torrents to automatically select best audiobook download.
 
@@ -19,6 +19,7 @@ Evaluates and scores torrents to automatically select best audiobook download.
 - ✅ **Author presence check (10 tests)**
 - ✅ **Context-aware filtering (3 tests)**
 - ✅ **API compatibility (2 tests)**
+- ✅ **CamelCase and punctuation separator handling (7 tests)**
 
 **Tested edge cases prevent regressions from previous tweaks:**
 - "We Are Legion (We Are Bob)" matching with/without subtitle
@@ -34,6 +35,18 @@ Evaluates and scores torrents to automatically select best audiobook download.
 ## Scoring Criteria (100 points max)
 
 **1. Title/Author Match (60 pts max) - MOST IMPORTANT**
+
+**Pre-Processing: Text Normalization**
+- All titles and author names are normalized before matching
+- **CamelCase splitting:** `"TheCorrespondent"` → `"the correspondent"`
+- **Punctuation to spaces:** `"Twelve.Months-Jim"` → `"twelve months jim"`
+- **Preserves apostrophes:** `"O'Brien"` remains `"o'brien"`
+- Handles common indexer naming patterns (NZB, torrent scene releases)
+
+**Examples of normalization:**
+- `"VirginaEvans TheCorrespondent"` → `"virgina evans the correspondent"`
+- `"Twelve.Months-Jim.Butcher"` → `"twelve months jim butcher"`
+- `"Author_Name-Book.Title.2024"` → `"author name book title 2024"`
 
 **Multi-Stage Matching:**
 

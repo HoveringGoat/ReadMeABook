@@ -114,6 +114,7 @@ export interface EbookSettings {
   flaresolverrUrl: string;
   // General settings (shared across sources)
   preferredFormat: string;
+  autoGrabEnabled: boolean;
 }
 
 /**

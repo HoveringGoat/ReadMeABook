@@ -139,6 +139,8 @@ export async function GET(request: NextRequest) {
         flaresolverrUrl: configMap.get('ebook_sidecar_flaresolverr_url') || '',
         // General settings
         preferredFormat: configMap.get('ebook_sidecar_preferred_format') || 'epub',
+        // Auto-grab: default true to preserve existing behavior
+        autoGrabEnabled: configMap.get('ebook_auto_grab_enabled') !== 'false',
       },
       general: {
         appName: configMap.get('app_name') || 'ReadMeABook',

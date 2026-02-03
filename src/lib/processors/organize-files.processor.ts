@@ -785,8 +785,16 @@ async function createEbookRequestIfEnabled(
   logger: RMABLogger
 ): Promise<void> {
   try {
-    // Check which ebook sources are enabled
     const configService = getConfigService();
+
+    // Check if auto-grab is enabled (default: true for backward compatibility)
+    const autoGrabEnabled = await configService.get('ebook_auto_grab_enabled');
+    if (autoGrabEnabled === 'false') {
+      logger.info('Ebook auto-grab disabled, skipping automatic ebook request creation');
+      return;
+    }
+
+    // Check which ebook sources are enabled
     const annasArchiveEnabled = await configService.get('ebook_annas_archive_enabled');
     const indexerSearchEnabled = await configService.get('ebook_indexer_search_enabled');
 

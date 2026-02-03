@@ -95,6 +95,7 @@ export interface RankedEbookTorrent extends TorrentResult {
   finalScore: number;         // score + bonusPoints
   rank: number;
   breakdown: EbookScoreBreakdown;
+  ebookFormat?: string;       // Detected ebook format (epub, pdf, mobi, etc.)
 }
 
 export class RankingAlgorithm {
@@ -331,6 +332,26 @@ export class RankingAlgorithm {
 
 
   /**
+   * Normalize text for matching by handling CamelCase and punctuation separators
+   * "VirginaEvans TheCorrespondent" → "virgina evans the correspondent"
+   * "Twelve.Months-Jim.Butcher" → "twelve months jim butcher"
+   * "Author_Name_Book" → "author name book"
+   */
+  private normalizeForMatching(text: string): string {
+    return text
+      // Split CamelCase FIRST (before lowercasing): "TheCorrespondent" → "The Correspondent"
+      .replace(/([a-z])([A-Z])/g, '$1 $2')
+      .toLowerCase()
+      // Replace underscores with spaces (must be explicit since \w includes _)
+      .replace(/_/g, ' ')
+      // Replace other punctuation/separators with spaces (preserves apostrophes in contractions)
+      .replace(/[^\w\s']/g, ' ')
+      // Collapse multiple spaces
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  /**
    * Score title/author match quality (60 points max)
    * Title similarity: 0-45 points (heavily weighted!)
    * Author presence: 0-15 points
@@ -340,10 +361,22 @@ export class RankingAlgorithm {
     audiobook: AudiobookRequest,
     requireAuthor: boolean = true
   ): number {
-    // Normalize whitespace (multiple spaces → single space) for consistent matching
-    const torrentTitle = torrent.title.toLowerCase().replace(/\s+/g, ' ').trim();
-    const requestTitle = audiobook.title.toLowerCase().replace(/\s+/g, ' ').trim();
-    const requestAuthor = audiobook.author.toLowerCase().replace(/\s+/g, ' ').trim();
+    // Normalize for matching (handles CamelCase, punctuation separators)
+    const torrentTitle = this.normalizeForMatching(torrent.title);
+    const requestTitle = this.normalizeForMatching(audiobook.title);
+
+    // Parse authors from RAW string first (preserving commas for splitting)
+    // Then normalize individual authors for matching
+    const requestAuthorRaw = audiobook.author.toLowerCase().replace(/\s+/g, ' ').trim();
+    const parsedAuthors = requestAuthorRaw
+      .split(/,|&| and | - /)
+      .map(a => a.trim())
+      .filter(a => a.length > 2 && !['translator', 'narrator'].includes(a));
+
+    // Normalize parsed authors for matching (handles CamelCase in author names)
+    const normalizedAuthors = parsedAuthors.map(a => this.normalizeForMatching(a));
+    // Combined normalized author string for fuzzy matching
+    const requestAuthorNormalized = normalizedAuthors.join(' ');
 
     // ========== STAGE 1: WORD COVERAGE FILTER (MANDATORY) ==========
     // Extract significant words (filter out common stop words)
@@ -351,26 +384,37 @@ export class RankingAlgorithm {
 
     const extractWords = (text: string, stopList: string[]): string[] => {
       return text
+        // Split CamelCase FIRST: "TheCorrespondent" → "The Correspondent"
+        .replace(/([a-z])([A-Z])/g, '$1 $2')
         .toLowerCase()
-        .replace(/[^\w\s]/g, ' ') // Remove punctuation
+        // Replace underscores with spaces (must be explicit since \w includes _)
+        .replace(/_/g, ' ')
+        // Remove other punctuation (but keep apostrophes for contractions)
+        .replace(/[^\w\s']/g, ' ')
         .split(/\s+/)
         .filter(word => word.length > 0 && !stopList.includes(word));
     };
 
     // Separate required words (outside parentheses/brackets) from optional words (inside)
     // This handles common patterns like "Title (Subtitle)" where subtitle may be omitted
+    // Note: Run on ORIGINAL title to preserve brackets, then normalize the result
     const separateRequiredOptional = (title: string): { required: string; optional: string } => {
+      // Work with original title format for bracket detection
+      const originalTitle = audiobook.title.toLowerCase();
+
       // Extract content in parentheses/brackets as optional
       const optionalPattern = /[(\[{]([^)\]}]+)[)\]}]/g;
       const optionalMatches: string[] = [];
       let match;
 
-      while ((match = optionalPattern.exec(title)) !== null) {
+      while ((match = optionalPattern.exec(originalTitle)) !== null) {
         optionalMatches.push(match[1]);
       }
 
       // Remove parenthetical/bracketed content to get required portion
-      const required = title.replace(/[(\[{][^)\]}]+[)\]}]/g, ' ').trim();
+      const requiredRaw = originalTitle.replace(/[(\[{][^)\]}]+[)\]}]/g, ' ').trim();
+      // Normalize the required portion (handles CamelCase, punctuation)
+      const required = this.normalizeForMatching(requiredRaw);
       const optional = optionalMatches.join(' ');
 
       return { required, optional };
@@ -400,13 +444,17 @@ export class RankingAlgorithm {
     // ========== STAGE 1.5: AUTHOR PRESENCE CHECK (OPTIONAL) ==========
     // Only enforced in automatic mode (requireAuthor: true)
     // Interactive search (requireAuthor: false) shows all results
-    if (requireAuthor && !this.checkAuthorPresence(torrentTitle, requestAuthor)) {
+    if (requireAuthor && !this.checkAuthorPresenceWithParsed(torrentTitle, normalizedAuthors)) {
       // No high-confidence author match → reject to prevent wrong-author matches
       return 0;
     }
 
     // ========== STAGE 2: TITLE MATCHING (0-35 points) ==========
     let titleScore = 0;
+
+    // Keep original torrent title (lowercased only) for metadata marker detection
+    // Markers like [ ] ( ) : are removed by normalization but needed for suffix validation
+    const torrentTitleOriginal = torrent.title.toLowerCase().replace(/\s+/g, ' ').trim();
 
     // Try matching with full title first, then fall back to required title (without parentheses)
     const titlesToTry = [requestTitle];
@@ -422,20 +470,37 @@ export class RankingAlgorithm {
         const beforeTitle = torrentTitle.substring(0, titleIndex);
         const afterTitle = torrentTitle.substring(titleIndex + titleToMatch.length);
 
+        // For metadata marker detection, try to find where the title starts in the ORIGINAL string
+        // Search for key words from the title to locate position in original
+        const titleWords = titleToMatch.split(/\s+/).filter(w => w.length > 2);
+        let afterTitleOriginal = '';
+        if (titleWords.length > 0) {
+          // Find the last significant title word in the original string
+          const lastTitleWord = titleWords[titleWords.length - 1];
+          const lastWordIdxOriginal = torrentTitleOriginal.lastIndexOf(lastTitleWord);
+          if (lastWordIdxOriginal !== -1) {
+            afterTitleOriginal = torrentTitleOriginal.substring(lastWordIdxOriginal + lastTitleWord.length);
+          }
+        }
+
         // Extract significant words BEFORE the matched title
         const beforeWords = extractWords(beforeTitle, stopWords);
 
         // Title is complete if:
         // 1. Acceptable prefix (no words, OR structured metadata like "Author - Series - ")
         // 2. Followed by clear metadata markers (not "'s Secret" or " Is Watching")
+        // Check ORIGINAL title for metadata markers ([ ] ( ) etc. not normalized away)
         const metadataMarkers = [' by ', ' - ', ' [', ' (', ' {', ' :', ','];
 
-        // Check if afterTitle starts with author name (handles space-separated format like "Title Author Year")
-        const afterStartsWithAuthor = requestAuthor.length > 2 &&
-          afterTitle.trim().startsWith(requestAuthor);
+        // Check if afterTitle starts with any author name (handles space-separated format like "Title Author Year")
+        const afterStartsWithAuthor = normalizedAuthors.some(author =>
+          author.length > 2 && afterTitle.trim().startsWith(author)
+        );
 
+        // Check metadata markers in both normalized and original suffixes
         const hasMetadataSuffix = afterTitle === '' ||
                                   metadataMarkers.some(marker => afterTitle.startsWith(marker)) ||
+                                  metadataMarkers.some(marker => afterTitleOriginal.startsWith(marker)) ||
                                   afterStartsWithAuthor;
 
         // Check prefix validity:
@@ -446,16 +511,32 @@ export class RankingAlgorithm {
 
         // Check if title is immediately preceded by a metadata separator
         // This handles "Author - Series - 01 - Title" patterns
+        // Check both normalized and original strings for separators
         const precedingText = beforeTitle.trimEnd();
+
+        // Also check original string for separators that got normalized away (like colons)
+        let beforeTitleOriginal = '';
+        if (titleWords.length > 0) {
+          const firstTitleWord = titleWords[0];
+          const firstWordIdxOriginal = torrentTitleOriginal.indexOf(firstTitleWord);
+          if (firstWordIdxOriginal !== -1) {
+            beforeTitleOriginal = torrentTitleOriginal.substring(0, firstWordIdxOriginal).trimEnd();
+          }
+        }
+
         const titlePrecededBySeparator =
           precedingText.endsWith('-') ||
           precedingText.endsWith(':') ||
-          precedingText.endsWith('—');
+          precedingText.endsWith('—') ||
+          beforeTitleOriginal.endsWith('-') ||
+          beforeTitleOriginal.endsWith(':') ||
+          beforeTitleOriginal.endsWith('—');
 
-        // Check if author name appears in the prefix
+        // Check if any author name appears in the prefix
         // This handles "Author Name - Title" patterns
-        const authorInPrefix = requestAuthor.length > 2 &&
-          beforeTitle.includes(requestAuthor);
+        const authorInPrefix = normalizedAuthors.some(author =>
+          author.length > 2 && beforeTitle.includes(author)
+        );
 
         const hasAcceptablePrefix =
           hasNoWordsPrefix ||
@@ -481,24 +562,18 @@ export class RankingAlgorithm {
     }
 
     // ========== STAGE 3: AUTHOR MATCHING (0-15 points) ==========
-    // Parse requested authors (split on separators, filter out roles)
-    const requestAuthors = requestAuthor
-      .split(/,|&| and | - /)
-      .map(a => a.trim())
-      .filter(a => a.length > 2 && !['translator', 'narrator'].includes(a));
-
     // Check how many authors appear in torrent title (exact substring match)
-    const authorMatches = requestAuthors.filter(author =>
+    const authorMatches = normalizedAuthors.filter(author =>
       torrentTitle.includes(author)
     );
 
     let authorScore = 0;
     if (authorMatches.length > 0) {
       // Exact substring match → proportional credit
-      authorScore = (authorMatches.length / requestAuthors.length) * 15;
+      authorScore = (authorMatches.length / normalizedAuthors.length) * 15;
     } else {
       // No exact match → use fuzzy similarity for partial credit
-      authorScore = compareTwoStrings(requestAuthor, torrentTitle) * 15;
+      authorScore = compareTwoStrings(requestAuthorNormalized, torrentTitle) * 15;
     }
 
     return Math.min(60, titleScore + authorScore);
@@ -506,22 +581,16 @@ export class RankingAlgorithm {
 
   /**
    * Check if author is present in torrent title with high confidence
-   * Handles variations: middle initials, spacing, punctuation, name order
+   * Uses pre-parsed and normalized authors array
    *
-   * @param torrentTitle - Normalized torrent title (lowercase)
-   * @param requestAuthor - Normalized author name (lowercase)
+   * @param torrentTitle - Normalized torrent title (already processed by normalizeForMatching)
+   * @param normalizedAuthors - Array of normalized author names (roles already filtered)
    * @returns true if at least ONE author is present with high confidence
    */
-  private checkAuthorPresence(torrentTitle: string, requestAuthor: string): boolean {
-    // Parse multiple authors (same logic as Stage 3 author matching)
-    const authors = requestAuthor
-      .split(/,|&| and | - /)
-      .map(a => a.trim())
-      .filter(a => a.length > 2 && !['translator', 'narrator'].includes(a));
-
+  private checkAuthorPresenceWithParsed(torrentTitle: string, normalizedAuthors: string[]): boolean {
     // At least ONE author must match with high confidence
-    return authors.some(author => {
-      // Check 1: Exact substring match
+    return normalizedAuthors.some(author => {
+      // Check 1: Exact substring match (works well now that both are normalized)
       if (torrentTitle.includes(author)) {
         return true;
       }
@@ -537,6 +606,7 @@ export class RankingAlgorithm {
       // Check 3: Core name components (first + last name present within 30 chars)
       // Handles: "Sanderson, Brandon" vs "Brandon Sanderson"
       // Handles: "Brandon R. Sanderson" vs "Brandon Sanderson"
+      // Now also handles: "VirginaEvans" → "virgina evans" (after normalization)
       const words = author.split(/\s+/).filter(w => w.length > 1);
       if (words.length >= 2) {
         const firstName = words[0];
@@ -556,6 +626,27 @@ export class RankingAlgorithm {
 
       return false;
     });
+  }
+
+  /**
+   * Check if author is present in torrent title with high confidence
+   * Handles variations: middle initials, spacing, punctuation, name order, CamelCase
+   *
+   * @param torrentTitle - Normalized torrent title (already processed by normalizeForMatching)
+   * @param requestAuthor - Raw author string (will be parsed and normalized internally)
+   * @returns true if at least ONE author is present with high confidence
+   */
+  private checkAuthorPresence(torrentTitle: string, requestAuthor: string): boolean {
+    // Parse multiple authors (same logic as Stage 3 author matching)
+    const authors = requestAuthor
+      .split(/,|&| and | - /)
+      .map(a => a.trim())
+      .filter(a => a.length > 2 && !['translator', 'narrator'].includes(a));
+
+    // Normalize each author for matching
+    const normalizedAuthors = authors.map(a => this.normalizeForMatching(a));
+
+    return this.checkAuthorPresenceWithParsed(torrentTitle, normalizedAuthors);
   }
 
   /**
@@ -687,6 +778,9 @@ export class RankingAlgorithm {
     });
 
     const ranked = filteredTorrents.map((torrent) => {
+      // Detect ebook format from title
+      const detectedFormat = this.detectEbookFormat(torrent);
+
       // Calculate base scores (0-100)
       // Reuse scoreMatch and scoreSeeders from audiobook ranking
       const formatScore = this.scoreEbookFormat(torrent, ebook.preferredFormat);
@@ -765,6 +859,7 @@ export class RankingAlgorithm {
             notes: [],
           }, ebook.preferredFormat),
         },
+        ebookFormat: detectedFormat !== 'unknown' ? detectedFormat : undefined,
       };
     });
 
@@ -824,19 +919,27 @@ export class RankingAlgorithm {
 
   /**
    * Detect ebook format from torrent title
+   * Handles formats in various positions: .epub, (epub), [epub], " epub"
    */
   private detectEbookFormat(torrent: TorrentResult): string {
     const title = torrent.title.toLowerCase();
 
     // Check for common ebook format extensions/keywords
-    if (title.includes('.epub') || title.includes(' epub')) return 'epub';
-    if (title.includes('.pdf') || title.includes(' pdf')) return 'pdf';
-    if (title.includes('.mobi') || title.includes(' mobi')) return 'mobi';
-    if (title.includes('.azw3') || title.includes(' azw3')) return 'azw3';
-    if (title.includes('.azw') || title.includes(' azw')) return 'azw';
-    if (title.includes('.fb2') || title.includes(' fb2')) return 'fb2';
-    if (title.includes('.cbz') || title.includes(' cbz')) return 'cbz';
-    if (title.includes('.cbr') || title.includes(' cbr')) return 'cbr';
+    // Patterns: .format, (format), [format], " format", "_format"
+    const formats = ['epub', 'pdf', 'mobi', 'azw3', 'azw', 'fb2', 'cbz', 'cbr'];
+
+    for (const format of formats) {
+      if (
+        title.includes(`.${format}`) ||    // file.epub
+        title.includes(`(${format})`) ||   // (epub)
+        title.includes(`[${format}]`) ||   // [epub]
+        title.includes(` ${format}`) ||    // " epub" (space before)
+        title.includes(`_${format}`) ||    // _epub (underscore)
+        title.endsWith(format)             // ends with format
+      ) {
+        return format;
+      }
+    }
 
     // Default to unknown
     return 'unknown';

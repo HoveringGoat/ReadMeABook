@@ -21,11 +21,9 @@ export async function processRetryMissingTorrents(payload: RetryMissingTorrentsP
   logger.info('Starting retry job for requests awaiting search...');
 
   try {
-    // Find all active audiobook requests in awaiting_search status
-    // Note: Ebook requests have separate search mechanism (search_ebook job)
+    // Find all active requests (audiobook or ebook) in awaiting_search status
     const requests = await prisma.request.findMany({
       where: {
-        type: 'audiobook', // Only audiobook requests (ebooks use different search)
         status: 'awaiting_search',
         deletedAt: null,
       },
@@ -45,20 +43,33 @@ export async function processRetryMissingTorrents(payload: RetryMissingTorrentsP
       };
     }
 
-    // Trigger search job for each request
+    // Trigger appropriate search job for each request based on type
     const jobQueue = getJobQueueService();
     let triggered = 0;
 
     for (const request of requests) {
       try {
-        await jobQueue.addSearchJob(request.id, {
-          id: request.audiobook.id,
-          title: request.audiobook.title,
-          author: request.audiobook.author,
-          asin: request.audiobook.audibleAsin || undefined,
-        });
-        triggered++;
-        logger.info(`Triggered search for request ${request.id}: ${request.audiobook.title}`);
+        if (request.type === 'ebook') {
+          // Ebook requests use ebook search (Anna's Archive, etc.)
+          await jobQueue.addSearchEbookJob(request.id, {
+            id: request.audiobook.id,
+            title: request.audiobook.title,
+            author: request.audiobook.author,
+            asin: request.audiobook.audibleAsin || undefined,
+          });
+          triggered++;
+          logger.info(`Triggered ebook search for request ${request.id}: ${request.audiobook.title}`);
+        } else {
+          // Audiobook requests use indexer search (Prowlarr)
+          await jobQueue.addSearchJob(request.id, {
+            id: request.audiobook.id,
+            title: request.audiobook.title,
+            author: request.audiobook.author,
+            asin: request.audiobook.audibleAsin || undefined,
+          });
+          triggered++;
+          logger.info(`Triggered audiobook search for request ${request.id}: ${request.audiobook.title}`);
+        }
       } catch (error) {
         logger.error(`Failed to trigger search for request ${request.id}: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }

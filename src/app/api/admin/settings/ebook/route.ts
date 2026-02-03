@@ -14,7 +14,10 @@ export async function PUT(request: NextRequest) {
     return requireAdmin(req, async () => {
       try {
         // Parse request body - new structure with separate source toggles
-        const { annasArchiveEnabled, indexerSearchEnabled, format, baseUrl, flaresolverrUrl } = await request.json();
+        const { annasArchiveEnabled, indexerSearchEnabled, format, baseUrl, flaresolverrUrl, autoGrabEnabled } = await request.json();
+
+        // Enforce: auto-grab must be false if no sources are enabled
+        const effectiveAutoGrabEnabled = (annasArchiveEnabled || indexerSearchEnabled) ? (autoGrabEnabled ?? true) : false;
 
         // Validate format
         const validFormats = ['epub', 'pdf', 'mobi', 'azw3', 'any'];
@@ -65,6 +68,12 @@ export async function PUT(request: NextRequest) {
             value: format || 'epub',
             category: 'ebook',
             description: 'Preferred e-book format',
+          },
+          {
+            key: 'ebook_auto_grab_enabled',
+            value: effectiveAutoGrabEnabled ? 'true' : 'false',
+            category: 'ebook',
+            description: 'Automatically create ebook requests after audiobook downloads complete',
           },
           // Anna's Archive specific settings
           {
