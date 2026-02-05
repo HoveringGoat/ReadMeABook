@@ -15,6 +15,7 @@ interface AudiobookGridProps {
   emptyMessage?: string;
   onRequestSuccess?: () => void;
   cardSize?: number; // 1-9, default 5
+  squareCovers?: boolean; // true = square (1:1), false = rectangle (2:3)
 }
 
 // Helper function to get grid classes based on card size
@@ -41,6 +42,7 @@ export function AudiobookGrid({
   emptyMessage = 'No audiobooks found',
   onRequestSuccess,
   cardSize = 5,
+  squareCovers = false,
 }: AudiobookGridProps) {
   const gridClasses = getGridClasses(cardSize);
 
@@ -48,7 +50,7 @@ export function AudiobookGrid({
     return (
       <div className={`grid ${gridClasses} gap-3 sm:gap-4 md:gap-6`}>
         {Array.from({ length: 8 }).map((_, i) => (
-          <SkeletonCard key={i} />
+          <SkeletonCard key={i} squareCovers={squareCovers} />
         ))}
       </div>
     );
@@ -76,23 +78,26 @@ export function AudiobookGrid({
   }
 
   return (
-    <div className={`grid ${gridClasses} gap-3 sm:gap-4 md:gap-6`}>
+    <div className={`grid ${gridClasses} gap-3 sm:gap-4 md:gap-6 transition-all duration-300`}>
       {audiobooks.map((audiobook) => (
         <AudiobookCard
           key={audiobook.asin}
           audiobook={audiobook}
           onRequestSuccess={onRequestSuccess}
+          squareCovers={squareCovers}
         />
       ))}
     </div>
   );
 }
 
-function SkeletonCard() {
+function SkeletonCard({ squareCovers = false }: { squareCovers?: boolean }) {
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden animate-pulse">
+    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden animate-pulse transition-all duration-300">
       {/* Cover Art Skeleton */}
-      <div className="aspect-[2/3] bg-gray-200 dark:bg-gray-700" />
+      <div className={`bg-gray-200 dark:bg-gray-700 ${
+        squareCovers ? 'aspect-square' : 'aspect-[2/3]'
+      }`} />
 
       {/* Content Skeleton */}
       <div className="p-4 space-y-3">

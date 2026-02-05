@@ -19,6 +19,7 @@ interface AudiobookCardProps {
   isRequested?: boolean;
   requestStatus?: string;
   onRequestSuccess?: () => void;
+  squareCovers?: boolean;
 }
 
 export function AudiobookCard({
@@ -26,6 +27,7 @@ export function AudiobookCard({
   isRequested = false,
   requestStatus,
   onRequestSuccess,
+  squareCovers = false,
 }: AudiobookCardProps) {
   const { user } = useAuth();
   const { createRequest, isLoading } = useCreateRequest();
@@ -59,10 +61,12 @@ export function AudiobookCard({
 
   return (
     <>
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow">
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-all duration-300">
         {/* Cover Art - Clickable */}
         <div
-          className="relative aspect-[2/3] bg-gray-200 dark:bg-gray-700 cursor-pointer group"
+          className={`relative bg-gray-200 dark:bg-gray-700 cursor-pointer group overflow-hidden ${
+            squareCovers ? 'aspect-square' : 'aspect-[2/3]'
+          }`}
           onClick={() => setShowModal(true)}
         >
           {audiobook.coverArtUrl ? (

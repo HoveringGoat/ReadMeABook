@@ -12,12 +12,13 @@ import { useAudiobooks } from '@/lib/hooks/useAudiobooks';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { StickyPagination } from '@/components/ui/StickyPagination';
 import { CardSizeControls } from '@/components/ui/CardSizeControls';
+import { SquareCoversToggle } from '@/components/ui/SquareCoversToggle';
 import { usePreferences } from '@/contexts/PreferencesContext';
 
 export default function HomePage() {
   const [popularPage, setPopularPage] = useState(1);
   const [newReleasesPage, setNewReleasesPage] = useState(1);
-  const { cardSize, setCardSize } = usePreferences();
+  const { cardSize, setCardSize, squareCovers, setSquareCovers } = usePreferences();
 
   // Refs for auto-scrolling to section tops
   const popularSectionRef = useRef<HTMLElement>(null);
@@ -62,10 +63,11 @@ export default function HomePage() {
             <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-md rounded-2xl px-4 sm:px-6 py-3 border border-gray-200/50 dark:border-gray-700/50 shadow-sm">
               <div className="flex items-center gap-3">
                 <div className="w-1 h-6 bg-gradient-to-b from-blue-500 to-purple-500 rounded-full" />
-                <h2 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 dark:text-gray-100">
+                <h2 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 dark:text-gray-100 truncate">
                   Popular Audiobooks
                 </h2>
-                <div className="ml-auto">
+                <div className="ml-auto flex items-center gap-1">
+                  <SquareCoversToggle enabled={squareCovers} onToggle={setSquareCovers} />
                   <CardSizeControls size={cardSize} onSizeChange={setCardSize} />
                 </div>
               </div>
@@ -89,6 +91,7 @@ export default function HomePage() {
                 isLoading={loadingPopular}
                 emptyMessage="No popular audiobooks available"
                 cardSize={cardSize}
+                squareCovers={squareCovers}
               />
             )}
           </div>
@@ -101,10 +104,11 @@ export default function HomePage() {
             <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-md rounded-2xl px-4 sm:px-6 py-3 border border-gray-200/50 dark:border-gray-700/50 shadow-sm">
               <div className="flex items-center gap-3">
                 <div className="w-1 h-6 bg-gradient-to-b from-emerald-500 to-teal-500 rounded-full" />
-                <h2 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 dark:text-gray-100">
+                <h2 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 dark:text-gray-100 truncate">
                   New Releases
                 </h2>
-                <div className="ml-auto">
+                <div className="ml-auto flex items-center gap-1">
+                  <SquareCoversToggle enabled={squareCovers} onToggle={setSquareCovers} />
                   <CardSizeControls size={cardSize} onSizeChange={setCardSize} />
                 </div>
               </div>
@@ -128,6 +132,7 @@ export default function HomePage() {
                 isLoading={loadingNewReleases}
                 emptyMessage="No new releases available"
                 cardSize={cardSize}
+                squareCovers={squareCovers}
               />
             )}
           </div>

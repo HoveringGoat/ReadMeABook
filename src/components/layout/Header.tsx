@@ -118,18 +118,21 @@ export function Header() {
       <div className="container mx-auto px-4 py-3 md:py-4 max-w-7xl">
         <div className="flex items-center justify-between">
           {/* Logo and Version Badge */}
-          <div className="flex items-center gap-3">
-            <Link href="/" className="flex items-center gap-2">
+          <div className="flex items-center gap-2 md:gap-3 min-w-0">
+            <Link href="/" className="flex items-center gap-2 min-w-0">
               <img
-                src="/rmab_32x32.png"
+                src="/RMAB_1024x1024_ICON.png"
                 alt="ReadMeABook Logo"
-                className="w-8 h-8"
+                className="w-8 h-8 flex-shrink-0"
               />
-              <span className="text-lg md:text-xl font-bold text-gray-900 dark:text-gray-100">
+              <span className="text-lg md:text-xl font-bold text-gray-900 dark:text-gray-100 truncate">
                 ReadMeABook
               </span>
             </Link>
-            <VersionBadge />
+            {/* Hide version badge on mobile to prevent overlap */}
+            <div className="hidden sm:block flex-shrink-0">
+              <VersionBadge />
+            </div>
           </div>
 
           {/* Desktop Navigation */}
@@ -203,7 +206,7 @@ export function Header() {
             </button>
 
             {user ? (
-              <div className="relative" ref={containerRef}>
+              <div className="relative flex-shrink-0" ref={containerRef}>
                 <button
                   onClick={() => setShowUserMenu(!showUserMenu)}
                   className="flex items-center gap-2 hover:opacity-80 transition-opacity"
@@ -212,10 +215,10 @@ export function Header() {
                     <img
                       src={user.avatarUrl}
                       alt={user.username}
-                      className="w-8 h-8 rounded-full"
+                      className="w-8 h-8 rounded-full flex-shrink-0"
                     />
                   ) : (
-                    <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white font-medium">
+                    <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white font-medium flex-shrink-0">
                       {user.username.charAt(0).toUpperCase()}
                     </div>
                   )}
@@ -278,6 +281,10 @@ export function Header() {
                 </Link>
               )}
             </nav>
+            {/* Version badge in mobile menu */}
+            <div className="sm:hidden mt-3 pt-3 border-t border-gray-200 dark:border-gray-700 px-3">
+              <VersionBadge />
+            </div>
           </div>
         )}
       </div>

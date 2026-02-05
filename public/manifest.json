@@ -8,7 +8,7 @@
   "theme_color": "#1e3a5f",
   "icons": [
     {
-      "src": "/RMAB_1024x1024.png",
+      "src": "/RMAB_1024x1024_ICON.png",
       "sizes": "1024x1024",
       "type": "image/png",
       "purpose": "any maskable"

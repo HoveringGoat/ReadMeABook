@@ -30,7 +30,7 @@ export const metadata: Metadata = {
     ],
     shortcut: "/rmab_icon.ico",
     apple: [
-      { url: "/RMAB_1024x1024.png", sizes: "1024x1024", type: "image/png" },
+      { url: "/RMAB_1024x1024_ICON.png", sizes: "1024x1024", type: "image/png" },
     ],
   },
   appleWebApp: {

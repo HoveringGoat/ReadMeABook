@@ -11,13 +11,14 @@ import { AudiobookGrid } from '@/components/audiobooks/AudiobookGrid';
 import { useSearch } from '@/lib/hooks/useAudiobooks';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { CardSizeControls } from '@/components/ui/CardSizeControls';
+import { SquareCoversToggle } from '@/components/ui/SquareCoversToggle';
 import { usePreferences } from '@/contexts/PreferencesContext';
 
 export default function SearchPage() {
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [page, setPage] = useState(1);
-  const { cardSize, setCardSize } = usePreferences();
+  const { cardSize, setCardSize, squareCovers, setSquareCovers } = usePreferences();
 
   // Debounce search query
   useEffect(() => {
@@ -109,15 +110,16 @@ export default function SearchPage() {
               <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-md rounded-2xl px-4 sm:px-6 py-3 border border-gray-200/50 dark:border-gray-700/50 shadow-sm">
                 <div className="flex items-center gap-3">
                   <div className="w-1 h-6 bg-gradient-to-b from-blue-500 to-purple-500 rounded-full" />
-                  <h2 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">
+                  <h2 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100 truncate">
                     Search Results
                   </h2>
                   {!isLoading && totalResults > 0 && (
-                    <span className="text-sm text-gray-600 dark:text-gray-400">
+                    <span className="text-sm text-gray-600 dark:text-gray-400 hidden sm:inline whitespace-nowrap">
                       ({totalResults.toLocaleString()} result{totalResults !== 1 ? 's' : ''})
                     </span>
                   )}
-                  <div className="ml-auto">
+                  <div className="ml-auto flex items-center gap-1">
+                    <SquareCoversToggle enabled={squareCovers} onToggle={setSquareCovers} />
                     <CardSizeControls size={cardSize} onSizeChange={setCardSize} />
                   </div>
                 </div>
@@ -130,6 +132,7 @@ export default function SearchPage() {
               isLoading={!!(isLoading && page === 1)}
               emptyMessage={`No results found for "${debouncedQuery}"`}
               cardSize={cardSize}
+              squareCovers={squareCovers}
             />
 
             {/* Load More */}

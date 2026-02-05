@@ -9,23 +9,28 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 
 interface Preferences {
   cardSize: number; // 1-9, default 5
+  squareCovers: boolean; // true = square (1:1), false = rectangle (2:3)
 }
 
 interface PreferencesContextType {
   cardSize: number;
   setCardSize: (size: number) => void;
+  squareCovers: boolean;
+  setSquareCovers: (enabled: boolean) => void;
 }
 
 const PreferencesContext = createContext<PreferencesContextType | undefined>(undefined);
 
 const DEFAULT_PREFERENCES: Preferences = {
   cardSize: 5,
+  squareCovers: false,
 };
 
 const STORAGE_KEY = 'preferences';
 
 export function PreferencesProvider({ children }: { children: ReactNode }) {
   const [cardSize, setCardSizeState] = useState<number>(DEFAULT_PREFERENCES.cardSize);
+  const [squareCovers, setSquareCoversState] = useState<boolean>(DEFAULT_PREFERENCES.squareCovers);
 
   // Load preferences from localStorage on mount
   useEffect(() => {
@@ -42,10 +47,13 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
           // Invalid size, reset to default
           setCardSizeState(DEFAULT_PREFERENCES.cardSize);
         }
+        // Load squareCovers preference (defaults to false if not set)
+        setSquareCoversState(preferences.squareCovers ?? DEFAULT_PREFERENCES.squareCovers);
       }
     } catch (error) {
       console.error('Failed to load preferences from localStorage:', error);
       setCardSizeState(DEFAULT_PREFERENCES.cardSize);
+      setSquareCoversState(DEFAULT_PREFERENCES.squareCovers);
     }
   }, []);
 
@@ -68,6 +76,22 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // Update square covers preference in state and localStorage
+  const setSquareCovers = (enabled: boolean) => {
+    if (typeof window === 'undefined') return;
+
+    setSquareCoversState(enabled);
+
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      const preferences: Preferences = stored ? JSON.parse(stored) : { ...DEFAULT_PREFERENCES };
+      preferences.squareCovers = enabled;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(preferences));
+    } catch (error) {
+      console.error('Failed to save preferences to localStorage:', error);
+    }
+  };
+
   // Listen for storage changes in other tabs (cross-tab sync)
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -80,6 +104,8 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
           if (preferences.cardSize >= 1 && preferences.cardSize <= 9) {
             setCardSizeState(preferences.cardSize);
           }
+          // Sync squareCovers preference
+          setSquareCoversState(preferences.squareCovers ?? DEFAULT_PREFERENCES.squareCovers);
         } catch (error) {
           console.error('Failed to parse preferences from storage event:', error);
         }
@@ -93,7 +119,7 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <PreferencesContext.Provider value={{ cardSize, setCardSize }}>
+    <PreferencesContext.Provider value={{ cardSize, setCardSize, squareCovers, setSquareCovers }}>
       {children}
     </PreferencesContext.Provider>
   );
