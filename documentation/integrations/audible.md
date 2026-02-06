@@ -47,7 +47,8 @@ Configurable Audible region for accurate metadata matching across different inte
 - `AudibleService` loads region from config on initialization
 - Dynamically builds base URL: `AUDIBLE_REGIONS[region].baseUrl`
 - Audnexus API calls include region parameter: `?region={code}`
-- IP redirect prevention: `?ipRedirectOverride=true` on all Audible requests
+- IP redirect prevention: `?ipRedirectOverride=true` on all Audible requests (region only)
+- **Locale enforcement:** Cookie `lc-acbus=en_US` + `handleLocaleRedirect()` detects non-English culture codes in response URLs and re-requests using the English URL from Audible's locale picker
 - Configuration service helper: `getAudibleRegion()` returns configured region
 - **Auto-detection of region changes**: Service checks config before each request and re-initializes if region changed
 - **Cache clearing**: When region changes, ConfigService cache and AudibleService initialization are cleared
@@ -225,3 +226,14 @@ interface EnrichedAudibleAudiobook extends AudibleAudiobook {
 - **Fix:** Added `mapRegionToABSProvider()` to convert RMAB region codes to AudiobookShelf provider values. US → `'audible'`, others → `'audible.{region}'` (e.g., `'audible.ca'`, `'audible.uk'`)
 - **Location:** `src/lib/services/audiobookshelf/api.ts:14, 147`
 - **Affects:** All Audiobookshelf metadata matching operations
+
+**Non-English locale pages served to users outside US (2026-02-05)**
+- **Problem:** Audible uses IP geolocation to add culture codes (e.g., `es_US`, `fr_CA`) to URLs, serving locale-specific pages. `ipRedirectOverride=true` only prevents region redirects (audible.com → audible.co.uk), NOT language/locale redirects within the same region.
+- **Impact:** Users self-hosting from non-English-speaking countries (e.g., Dominican Republic) got Spanish bestsellers/new releases on their homepage because the `audible_refresh` job scraped locale-redirected pages.
+- **Fix:** Three-layer defense in `AudibleService`:
+  1. **Cookie:** `lc-acbus=en_US` header hints English locale preference
+  2. **Locale picker detection (primary):** After every request, checks response URL for non-`en_*` culture codes (`xx_YY` pattern). If found, parses page HTML for Audible's `<adbl-toggle-chip>` locale picker, extracts the English option's `data-value` URL, and re-requests. Data-driven — uses Audible's own English URL rather than guessing.
+  3. **Fallback URL rewrite:** If no locale picker found, strips the culture code from the path and adds `language=en_US` query param (mirrors picker pattern).
+- **Verification:** After correction, validates the response URL no longer contains a non-English culture code and logs success/failure.
+- **Location:** `src/lib/integrations/audible.service.ts` — `handleLocaleRedirect()`, `initialize()`
+- **Affects:** All Audible scraping: popular, new releases, search, detail pages (via `fetchWithRetry`)
