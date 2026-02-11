@@ -17,6 +17,15 @@ vi.mock('@/lib/hooks/useRequests', () => ({
   useRequests: useRequestsMock,
 }));
 
+vi.mock('@/contexts/PreferencesContext', () => ({
+  usePreferences: () => ({
+    cardSize: 5,
+    setCardSize: vi.fn(),
+    squareCovers: true,
+    setSquareCovers: vi.fn(),
+  }),
+}));
+
 vi.mock('@/components/layout/Header', () => ({
   Header: () => <div data-testid="header" />,
 }));
